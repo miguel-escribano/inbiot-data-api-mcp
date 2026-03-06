@@ -1,0 +1,45 @@
+# InBiot MCP Server - Configuration Example
+# ==========================================
+# Copy this file to 'inbiot-config.yaml' and fill in your real credentials
+#
+# IMPORTANT: inbiot-config.yaml is excluded from git to protect your credentials
+
+# OpenWeather API key (optional - for outdoor weather and air quality context)
+# Get your free key at: https://openweathermap.org/api
+openweather_api_key: "your-openweather-api-key-here"
+
+# Device Configurations
+# =====================
+# Each device needs:
+#   - name: Human-readable name for the device
+#   - api_key: From My inBiot platform (https://my.inbiot.es)
+#   - system_id: From My inBiot platform
+#   - latitude: Device location latitude (-90 to 90)
+#   - longitude: Device location longitude (-180 to 180)
+#
+# Find coordinates at: https://www.latlong.net/
+
+devices:
+  # Example: Main office device
+  office:
+    name: "Main Office"
+    api_key: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+    system_id: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    latitude: 40.416775
+    longitude: -3.703790
+
+  # Example: Laboratory device
+  lab:
+    name: "Laboratory"
+    api_key: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+    system_id: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    latitude: 40.416775
+    longitude: -3.703790
+
+  # Add more devices as needed...
+  # meeting_room:
+  #   name: "Meeting Room 1"
+  #   api_key: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+  #   system_id: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  #   latitude: 40.416775
+  #   longitude: -3.703790
