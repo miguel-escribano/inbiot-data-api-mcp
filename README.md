@@ -1,6 +1,20 @@
 # inbiot-data-api
 
-Stateless MCP server providing InBiot sensor data and WELL compliance tools. Designed as a pure data API for the Anne IAQ plugin -- no persona, no prompts, no resources.
+Stateless MCP server providing InBiot sensor data and WELL compliance tools. Designed as a pure data API for the [Anne IAQ plugin](https://github.com/miguel-escribano/inbiot-Anne-IAQ-consultant-as-a-plugin) — no persona, no prompts, no resources.
+
+> **Architecture note:** This is the "split" approach — data API here, intelligence in the plugin. For a standalone MCP that bundles both data and Anne's persona/prompts, see [inBiot_MCP_with_WeatherAPI_and_WELL_standard](https://github.com/miguel-escribano/inBiot_MCP_with_WeatherAPI_and_WELL_standard).
+
+## Remote access
+
+The server is deployed at:
+
+```
+https://mcp.miguel-escribano.com/inbiot-mcp-for-Anne-IAQ-consultant-as-a-plugin/sse
+```
+
+Auth header: `X-MCP-Token: <your-token>`
+
+To request a token, email **mescribano@inbiot.es**.
 
 ## Tools (14)
 
@@ -12,7 +26,7 @@ Stateless MCP server providing InBiot sensor data and WELL compliance tools. Des
 
 **Weather (2):** `outdoor_snapshot`, `indoor_vs_outdoor`
 
-## Setup
+## Setup (local)
 
 ```bash
 python -m venv .venv
@@ -31,19 +45,8 @@ pip install -e .
 python server.py
 ```
 
-Default transport: stdio. For SSE deployment, run behind a reverse proxy (e.g., Caddy) on a dedicated port.
+Default transport: stdio. For SSE deployment, run behind a reverse proxy on a dedicated port.
 
-## Deployment (Linux)
+## License
 
-```bash
-# Install
-cd /opt/anne-mcp-server
-python3 -m venv .venv
-.venv/bin/pip install -e .
-
-# systemd service (port 8001)
-sudo systemctl enable --now anne-mcp-server
-
-# Caddy route
-# handle_path /anne/* { reverse_proxy localhost:8001 }
-```
+MIT
