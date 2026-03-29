@@ -64,7 +64,7 @@ except OpenWeatherAPIError:
     openweather_client = None
 
 mcp = FastMCP(
-    "inbiot-data-api",
+    "inbiot-data-api-mcp",
     instructions=(
         "Stateless data API for InBiot sensor readings and WELL compliance checks. "
         "Returns raw data only. No persona, no analysis, no recommendations."

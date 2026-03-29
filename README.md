@@ -1,4 +1,4 @@
-# inbiot-data-api (MCP Server)
+# inbiot-data-api-mcp (MCP Server)
 
 ## What is this?
 
@@ -11,7 +11,7 @@ The intelligence (Anne's persona, WELL knowledge, skill workflows) lives in the 
 ```
 ┌─────────────────────────────────┐     ┌──────────────────────────────────┐
 │  Plugin (intelligence)          │     │  This server (data)              │
-│  inbiot-Anne-IAQ-consultant-... │     │  inbiot-mcp-for-Anne-IAQ-...     │
+│  inbiot-Anne-IAQ-consultant-... │     │  inbiot-data-api-mcp             │
 │                                 │     │                                  │
 │  CLAUDE.md  = Anne's persona    │────>│  server.py  = MCP entry point    │
 │  skills/    = slash commands    │ MCP │  src/api/   = HTTP clients       │
@@ -30,7 +30,7 @@ The easiest way -- no installation. Just point your MCP client at the hosted ser
 Add this to your MCP configuration:
 
 ```json
-"inbiot-data-api": {
+"inbiot-data-api-mcp": {
   "command": "npx",
   "args": [
     "-y",
@@ -97,7 +97,7 @@ All tools return JSON dicts. No Markdown in responses -- saves context tokens an
 
 ```bash
 git clone <repo-url>
-cd inbiot-mcp-for-Anne-IAQ-consultant-as-a-plugin
+cd inbiot-data-api
 
 python -m venv .venv
 source .venv/bin/activate    # Windows: .venv\Scripts\activate

@@ -1,5 +1,5 @@
 [project]
-name = "inbiot-data-api"
+name = "inbiot-data-api-mcp"
 version = "0.1.0"
 description = "Stateless MCP data API for InBiot sensor data and WELL compliance tools"
 requires-python = ">=3.10"
@@ -12,7 +12,7 @@ dependencies = [
 ]
 
 [project.scripts]
-inbiot-data-api = "server:main"
+inbiot-data-api-mcp = "server:main"
 
 [project.optional-dependencies]
 dev = [
