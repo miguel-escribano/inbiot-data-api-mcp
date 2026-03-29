@@ -96,8 +96,8 @@ All tools return JSON dicts. No Markdown in responses -- saves context tokens an
 ### Install
 
 ```bash
-git clone <repo-url>
-cd inbiot-data-api
+git clone https://github.com/miguel-escribano/inbiot-data-api-mcp.git
+cd inbiot-data-api-mcp
 
 python -m venv .venv
 source .venv/bin/activate    # Windows: .venv\Scripts\activate
