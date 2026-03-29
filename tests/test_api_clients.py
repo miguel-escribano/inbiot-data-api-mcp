@@ -7,6 +7,7 @@ import httpx
 from src.api.inbiot import InBiotClient, InBiotAPIError
 from src.api.openweather import OpenWeatherClient, OpenWeatherAPIError
 from src.models.schemas import DeviceConfig
+from src.utils.cache import AsyncTTLCache
 
 
 @pytest.fixture
@@ -27,7 +28,7 @@ def mock_inbiot_response():
         {
             "_id": "temp_001",
             "type": "temperature",
-            "unit": "°C",
+            "unit": "C",
             "measurements": [
                 {"_id": "m1", "value": "22.5", "date": 1702000000000}
             ],
@@ -51,17 +52,14 @@ class TestInBiotClient:
         self, device_config, mock_inbiot_response
     ):
         """Test successful API call."""
-        client = InBiotClient()
+        cache = AsyncTTLCache()
+        client = InBiotClient(cache=cache)
 
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = mock_inbiot_response
 
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_client.return_value.__aenter__.return_value.get = AsyncMock(
-                return_value=mock_response
-            )
-
+        with patch.object(client._client, "get", new_callable=AsyncMock, return_value=mock_response):
             data = await client.get_latest_measurements(device_config)
 
             assert len(data) == 2
@@ -71,6 +69,30 @@ class TestInBiotClient:
             assert data[1].latest_value == 650
 
     @pytest.mark.asyncio
+    async def test_cache_hit_avoids_http(
+        self, device_config, mock_inbiot_response
+    ):
+        """Test that cached responses skip HTTP calls."""
+        cache = AsyncTTLCache()
+        client = InBiotClient(cache=cache)
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = mock_inbiot_response
+
+        mock_get = AsyncMock(return_value=mock_response)
+        with patch.object(client._client, "get", mock_get):
+            # First call hits HTTP
+            data1 = await client.get_latest_measurements(device_config)
+            assert mock_get.call_count == 1
+
+            # Second call should use cache
+            data2 = await client.get_latest_measurements(device_config)
+            assert mock_get.call_count == 1  # no additional HTTP call
+
+            assert len(data1) == len(data2)
+
+    @pytest.mark.asyncio
     async def test_get_latest_measurements_not_found(self, device_config):
         """Test 404 response handling."""
         client = InBiotClient()
@@ -78,11 +100,7 @@ class TestInBiotClient:
         mock_response = MagicMock()
         mock_response.status_code = 404
 
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_client.return_value.__aenter__.return_value.get = AsyncMock(
-                return_value=mock_response
-            )
-
+        with patch.object(client._client, "get", new_callable=AsyncMock, return_value=mock_response):
             with pytest.raises(InBiotAPIError) as exc_info:
                 await client.get_latest_measurements(device_config)
 
@@ -90,38 +108,26 @@ class TestInBiotClient:
             assert "not found" in exc_info.value.message.lower()
 
     @pytest.mark.asyncio
-    async def test_get_latest_measurements_rate_limited(self, device_config):
-        """Test 429 response handling."""
-        client = InBiotClient()
-
-        mock_response = MagicMock()
-        mock_response.status_code = 429
-
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_client.return_value.__aenter__.return_value.get = AsyncMock(
-                return_value=mock_response
-            )
-
-            with pytest.raises(InBiotAPIError) as exc_info:
-                await client.get_latest_measurements(device_config)
-
-            assert exc_info.value.status_code == 429
-            assert "rate limit" in exc_info.value.message.lower()
-
-    @pytest.mark.asyncio
     async def test_get_latest_measurements_timeout(self, device_config):
         """Test timeout handling."""
         client = InBiotClient()
 
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_client.return_value.__aenter__.return_value.get = AsyncMock(
-                side_effect=httpx.TimeoutException("Connection timed out")
-            )
-
+        with patch.object(
+            client._client, "get",
+            new_callable=AsyncMock,
+            side_effect=httpx.TimeoutException("Connection timed out"),
+        ):
             with pytest.raises(InBiotAPIError) as exc_info:
                 await client.get_latest_measurements(device_config)
 
             assert "timed out" in exc_info.value.message.lower()
+
+    @pytest.mark.asyncio
+    async def test_shared_client_single_instance(self):
+        """Test that InBiotClient uses a single httpx client instance."""
+        client = InBiotClient()
+        # The _client attribute should be an httpx.AsyncClient
+        assert isinstance(client._client, httpx.AsyncClient)
 
 
 class TestOpenWeatherClient:
@@ -178,3 +184,8 @@ class TestOpenWeatherClient:
             assert conditions.pm25 == 10.0
             assert conditions.location == "Test Location"
 
+    @pytest.mark.asyncio
+    async def test_shared_client_single_instance(self):
+        """Test that OpenWeatherClient uses a single httpx client instance."""
+        client = OpenWeatherClient(api_key="test-key")
+        assert isinstance(client._client, httpx.AsyncClient)

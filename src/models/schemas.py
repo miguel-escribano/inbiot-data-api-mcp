@@ -12,6 +12,7 @@ class DeviceConfig(BaseModel):
     api_key: str
     system_id: str
     coordinates: tuple[float, float]
+    building: Optional[str] = None
 
 
 class Measurement(BaseModel):

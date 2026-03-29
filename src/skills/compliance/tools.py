@@ -8,11 +8,9 @@ from pydantic import Field
 from src.api.inbiot import InBiotClient, InBiotAPIError
 from src.models.schemas import DeviceConfig
 from src.well.compliance import WELLComplianceEngine
-from src.well.thresholds import get_threshold_for_parameter, is_range_based, is_higher_better
-from src.utils.provenance import (
-    generate_provenance,
-    create_data_unavailable_error,
-)
+from src.well.thresholds import get_threshold_for_parameter, is_range_based, is_higher_better, normalize_parameter_name
+from src.utils.dates import parse_date_param
+from src.utils.validation import validate_device
 
 
 def register_compliance_tools(
@@ -26,72 +24,59 @@ def register_compliance_tools(
     @mcp.tool()
     async def well_compliance_check(
         device: Annotated[str, Field(description="Device ID to check WELL compliance for")]
-    ) -> str:
+    ) -> dict:
         """
         Assess WELL Building Standard compliance for an InBiot device.
 
         Evaluates current air quality against WELL v2, ASHRAE 62.1/55, and WHO Indoor
         standards. Returns certification level eligibility and parameter-by-parameter assessment.
         """
-        if device not in devices:
-            return f"Unknown device: {device}. Use list_devices to see available options."
-
-        device_config = devices[device]
-        endpoint = f"/last-measurements/{device_config.api_key}/{device_config.system_id}"
+        try:
+            device_config = validate_device(devices, device)
+        except ValueError as e:
+            return {"error": str(e)}
 
         try:
             data = await inbiot_client.get_latest_measurements(device_config)
             assessment = well_engine.assess(device_config.name, data)
 
-            # Format results
-            result = f"## WELL Compliance Assessment: {device_config.name}\n\n"
-            result += f"### Overall Score: {assessment.overall_score}/{assessment.max_score} ({assessment.percentage}%)\n"
-            result += f"### Certification Level: **{assessment.well_level}**\n\n"
-
-            result += "### Parameter Assessment\n\n"
-            result += "| Parameter | Value | Level | WELL Compliant |\n"
-            result += "|-----------|-------|-------|----------------|\n"
-
-            for param in assessment.parameters:
-                compliant = "✅" if param.well_compliant else "❌"
-                result += f"| {param.parameter} | {param.value} {param.unit} | {param.level} | {compliant} |\n"
-
-            result += "\n### Recommendations\n\n"
-            for rec in assessment.recommendations:
-                result += f"- {rec}\n"
-
-            # Add provenance
-            result += generate_provenance(
-                device_name=device_config.name,
-                device_api_key=device_config.api_key,
-                endpoint=endpoint,
-                data=data,
-                analysis_type="WELL Compliance Assessment",
-            )
-
-            return result
+            return {
+                "device": assessment.device_name,
+                "overall_score": assessment.overall_score,
+                "max_score": assessment.max_score,
+                "percentage": assessment.percentage,
+                "well_level": assessment.well_level,
+                "parameters": [
+                    {
+                        "parameter": p.parameter,
+                        "value": p.value,
+                        "unit": p.unit,
+                        "score": p.score,
+                        "level": p.level,
+                        "well_compliant": p.well_compliant,
+                    }
+                    for p in assessment.parameters
+                ],
+                "recommendations": assessment.recommendations,
+            }
 
         except InBiotAPIError as e:
-            return create_data_unavailable_error(
-                device_name=device_config.name,
-                error_message=e.message,
-                endpoint=endpoint,
-            )
+            return {"error": e.message, "device": device_config.name}
 
     @mcp.tool()
     async def well_feature_compliance(
         device: Annotated[str, Field(description="Device ID for WELL feature analysis")]
-    ) -> str:
+    ) -> dict:
         """
         Get WELL Building Standard compliance broken down by individual features (A01-A08, T01-T07).
 
         Shows compliance status for each WELL v2 feature with specific scores and
         recommendations. More detailed than standard compliance check.
         """
-        if device not in devices:
-            return f"Unknown device: {device}. Use list_devices to see available options."
-
-        device_config = devices[device]
+        try:
+            device_config = validate_device(devices, device)
+        except ValueError as e:
+            return {"error": str(e)}
 
         try:
             from src.well.features import WELL_FEATURES
@@ -99,8 +84,7 @@ def register_compliance_tools(
 
             data = await inbiot_client.get_latest_measurements(device_config)
 
-            # Group parameters by feature
-            feature_data = {}
+            features = []
             for feature_id, feature in WELL_FEATURES.items():
                 feature_params = []
                 for param in data:
@@ -108,7 +92,6 @@ def register_compliance_tools(
                         feature_params.append(param)
 
                 if feature_params:
-                    # Assess parameters for this feature
                     assessments = []
                     total_score = 0
                     max_score = 0
@@ -121,132 +104,86 @@ def register_compliance_tools(
                             max_score += 4
 
                     percentage = (total_score / max_score * 100) if max_score > 0 else 0
+                    compliant = percentage >= 50
 
-                    feature_data[feature_id] = {
-                        "feature": feature,
+                    entry = {
+                        "feature_id": feature_id,
+                        "name": feature.name,
                         "score": total_score,
                         "max_score": max_score,
                         "percentage": round(percentage, 1),
                         "level": well_engine._determine_well_level(percentage),
-                        "compliant": percentage >= 50,
-                        "assessments": assessments,
+                        "compliant": compliant,
                     }
 
-            # Format results
-            result = f"## WELL Feature Compliance: {device_config.name}\n\n"
+                    if not compliant:
+                        entry["health_impact"] = feature.health_impact
+                        entry["mitigation_strategies"] = feature.mitigation_strategies[:3]
 
-            # Air quality features
-            result += "### Air Quality Features (A01-A08)\n\n"
-            result += "| Feature | Name | Score | Level | Status |\n"
-            result += "|---------|------|-------|-------|--------|\n"
+                    features.append(entry)
 
-            for feature_id in ["A01", "A03", "A05", "A06", "A08"]:
-                if feature_id in feature_data:
-                    fd = feature_data[feature_id]
-                    status = "✅" if fd["compliant"] else "❌"
-                    result += f"| {feature_id} | {fd['feature'].name} | {fd['score']}/{fd['max_score']} | {fd['level']} | {status} |\n"
-
-            # Thermal comfort features
-            result += "\n### Thermal Comfort Features (T01-T07)\n\n"
-            result += "| Feature | Name | Score | Level | Status |\n"
-            result += "|---------|------|-------|-------|--------|\n"
-
-            for feature_id in ["T01", "T06", "T07"]:
-                if feature_id in feature_data:
-                    fd = feature_data[feature_id]
-                    status = "✅" if fd["compliant"] else "❌"
-                    result += f"| {feature_id} | {fd['feature'].name} | {fd['score']}/{fd['max_score']} | {fd['level']} | {status} |\n"
-
-            # Feature-specific recommendations
-            result += "\n### Feature-Specific Recommendations\n\n"
-
-            for feature_id, fd in feature_data.items():
-                if not fd["compliant"]:
-                    result += f"**{feature_id} - {fd['feature'].name}** ({fd['percentage']:.0f}% compliant)\n"
-                    result += f"- Health Impact: {fd['feature'].health_impact}\n"
-                    result += "- Actions:\n"
-                    for strategy in fd['feature'].mitigation_strategies[:3]:
-                        result += f"  • {strategy}\n"
-                    result += "\n"
-
-            if all(fd["compliant"] for fd in feature_data.values()):
-                result += "✅ All monitored features are compliant. Excellent performance!\n"
-
-            return result
+            return {
+                "device": device_config.name,
+                "features": features,
+            }
 
         except InBiotAPIError as e:
-            return create_data_unavailable_error(
-                device_name=device_config.name,
-                error_message=e.message,
-            )
+            return {"error": e.message, "device": device_config.name}
 
     @mcp.tool()
     async def health_recommendations(
         device: Annotated[str, Field(description="Device ID to generate recommendations for")]
-    ) -> str:
+    ) -> dict:
         """
         Generate health and comfort recommendations based on current air quality.
 
         Provides actionable advice for building managers and occupants based on
         current sensor readings and WELL Building Standard guidelines.
         """
-        if device not in devices:
-            return f"Unknown device: {device}. Use list_devices to see available options."
-
-        device_config = devices[device]
+        try:
+            device_config = validate_device(devices, device)
+        except ValueError as e:
+            return {"error": str(e)}
 
         try:
             data = await inbiot_client.get_latest_measurements(device_config)
             assessment = well_engine.assess(device_config.name, data)
 
-            result = f"## Health Recommendations: {device_config.name}\n\n"
-
-            # Overall status
             if assessment.percentage >= 75:
-                result += "### Overall Status: ✅ Good\n\n"
-                result += "Air quality conditions are favorable for occupant health and productivity.\n\n"
+                overall_status = "good"
             elif assessment.percentage >= 50:
-                result += "### Overall Status: ⚠️ Moderate\n\n"
-                result += "Some parameters need attention. Review recommendations below.\n\n"
+                overall_status = "moderate"
             else:
-                result += "### Overall Status: ❌ Needs Improvement\n\n"
-                result += "Multiple air quality issues detected. Immediate action recommended.\n\n"
+                overall_status = "needs_improvement"
 
-            # Specific recommendations with context-aware targets
-            result += "### Specific Recommendations\n\n"
-
+            issues = []
             for param in assessment.parameters:
-                if param.score <= 1:
-                    result += f"**🔴 {param.parameter.upper()}** ({param.value} {param.unit})\n"
-                    result += f"- Status: {param.level}\n"
-                    result += f"- Action: Immediate intervention required\n"
-                    result += _get_context_aware_advice(param.parameter, param.value, param.unit, "critical")
-                    result += "\n"
-                elif param.score == 2:
-                    result += f"**🟡 {param.parameter.upper()}** ({param.value} {param.unit})\n"
-                    result += f"- Status: {param.level}\n"
-                    result += _get_context_aware_advice(param.parameter, param.value, param.unit, "moderate")
-                    result += "\n"
+                if param.score <= 2:
+                    severity = "critical" if param.score <= 1 else "moderate"
+                    entry = {
+                        "parameter": param.parameter,
+                        "value": param.value,
+                        "unit": param.unit,
+                        "level": param.level,
+                        "severity": severity,
+                        "advice": _get_advice_dict(param.parameter, param.value, param.unit, severity),
+                    }
+                    issues.append(entry)
 
-            # General advice
-            result += "### General Guidance\n\n"
-            result += "- Monitor air quality trends over time\n"
-            result += "- Ensure HVAC systems are properly maintained\n"
-            result += "- Consider air purifiers for high-traffic areas\n"
-            result += "- Communicate with occupants about air quality status\n"
-
-            return result
+            return {
+                "device": device_config.name,
+                "overall_status": overall_status,
+                "percentage": assessment.percentage,
+                "issues": issues,
+            }
 
         except InBiotAPIError as e:
-            return create_data_unavailable_error(
-                device_name=device_config.name,
-                error_message=e.message,
-            )
+            return {"error": e.message, "device": device_config.name}
 
     @mcp.tool()
     async def well_certification_roadmap(
         device: Annotated[str, Field(description="Device ID for certification roadmap")]
-    ) -> str:
+    ) -> dict:
         """
         Get a prioritized roadmap to improve WELL certification level.
 
@@ -254,50 +191,42 @@ def register_compliance_tools(
         (points gained per effort). Shows the fastest path to the next
         certification level with specific, actionable steps.
         """
-        if device not in devices:
-            return f"Unknown device: {device}. Use list_devices to see available options."
-
-        device_config = devices[device]
+        try:
+            device_config = validate_device(devices, device)
+        except ValueError as e:
+            return {"error": str(e)}
 
         try:
             data = await inbiot_client.get_latest_measurements(device_config)
             assessment = well_engine.assess(device_config.name, data)
 
-            result = f"## WELL Certification Roadmap: {device_config.name}\n\n"
-            result += f"**Current Level**: {assessment.well_level} ({assessment.percentage:.0f}%)\n\n"
-
-            # Determine next level target
             if assessment.percentage < 40:
-                next_level = "Bronze"
-                target_pct = 40
+                next_level, target_pct = "Bronze", 40
             elif assessment.percentage < 60:
-                next_level = "Silver"
-                target_pct = 60
+                next_level, target_pct = "Silver", 60
             elif assessment.percentage < 75:
-                next_level = "Gold"
-                target_pct = 75
+                next_level, target_pct = "Gold", 75
             elif assessment.percentage < 90:
-                next_level = "Platinum"
-                target_pct = 90
+                next_level, target_pct = "Platinum", 90
             else:
-                result += "🏆 **Congratulations!** You've achieved Platinum-level compliance.\n\n"
-                result += "Focus on maintaining current excellent conditions.\n"
-                return result
+                return {
+                    "device": device_config.name,
+                    "current_level": assessment.well_level,
+                    "percentage": assessment.percentage,
+                    "status": "platinum_achieved",
+                }
 
             points_needed = int((target_pct - assessment.percentage) * assessment.max_score / 100)
-            result += f"**Next Target**: {next_level} ({target_pct}%) - Need ~{points_needed} more points\n\n"
 
-            # Analyze improvement opportunities
             opportunities = []
             for param in assessment.parameters:
-                if param.score < 4:  # Room for improvement
+                if param.score < 4:
                     threshold = get_threshold_for_parameter(param.parameter)
                     if not threshold:
                         continue
 
-                    potential_gain = 4 - param.score  # Max points we could gain
+                    potential_gain = 4 - param.score
 
-                    # Calculate effort (how far from next threshold)
                     if is_range_based(param.parameter):
                         optimal_min = threshold.get("optimal_min", 20)
                         optimal_max = threshold.get("optimal_max", 24)
@@ -307,13 +236,12 @@ def register_compliance_tools(
                             effort = param.value - optimal_max
                         else:
                             effort = 0
-                        effort_str = f"{effort:.1f} {param.unit} adjustment needed"
+                        action = f"{effort:.1f} {param.unit} adjustment needed"
                     elif is_higher_better(param.parameter):
                         next_threshold = threshold.get("good", 60) if param.score < 3 else threshold.get("excellent", 80)
                         effort = next_threshold - param.value
-                        effort_str = f"Improve by {effort:.0f} points"
+                        action = f"Improve by {effort:.0f} points"
                     else:
-                        # Pollutants - lower is better
                         if param.score == 0:
                             next_threshold = threshold.get("poor", param.value)
                         elif param.score == 1:
@@ -323,9 +251,8 @@ def register_compliance_tools(
                         else:
                             next_threshold = threshold.get("excellent", param.value)
                         effort = param.value - next_threshold
-                        effort_str = f"Reduce by {effort:.0f} {param.unit}"
+                        action = f"Reduce by {effort:.0f} {param.unit}"
 
-                    # ROI = points gained / relative effort
                     roi = potential_gain / max(effort, 0.1) if effort > 0 else potential_gain * 10
 
                     opportunities.append({
@@ -334,118 +261,182 @@ def register_compliance_tools(
                         "unit": param.unit,
                         "score": param.score,
                         "potential_gain": potential_gain,
-                        "effort_str": effort_str,
-                        "roi": roi,
+                        "action": action,
+                        "roi": round(roi, 2),
                         "level": param.level,
                     })
 
-            # Sort by ROI (highest first = easiest wins)
             opportunities.sort(key=lambda x: x["roi"], reverse=True)
 
-            result += "### Priority Actions (by ROI)\n\n"
-            result += "| Priority | Parameter | Current | Potential | Action |\n"
-            result += "|----------|-----------|---------|-----------|--------|\n"
-
-            for i, opp in enumerate(opportunities[:5], 1):
-                result += f"| {i} | {opp['parameter'].upper()} | {opp['current']} {opp['unit']} | +{opp['potential_gain']} pts | {opp['effort_str']} |\n"
-
-            result += "\n### Quick Wins\n\n"
-            quick_wins = [o for o in opportunities if o["score"] == 2 or o["score"] == 3]
-            if quick_wins:
-                for opp in quick_wins[:3]:
-                    result += f"- **{opp['parameter'].upper()}**: Already at '{opp['level']}' - small improvement reaches next tier\n"
-            else:
-                result += "- Focus on the priority actions above\n"
-
-            result += "\n### Estimated Path to " + next_level + "\n\n"
             cumulative = 0
+            steps_to_target = len(opportunities)
             for i, opp in enumerate(opportunities, 1):
                 cumulative += opp["potential_gain"]
                 if cumulative >= points_needed:
-                    result += f"Improving the top {i} parameters would achieve {next_level} certification.\n"
+                    steps_to_target = i
                     break
 
-            return result
+            return {
+                "device": device_config.name,
+                "current_level": assessment.well_level,
+                "percentage": assessment.percentage,
+                "next_level": next_level,
+                "target_pct": target_pct,
+                "points_needed": points_needed,
+                "opportunities": opportunities[:5],
+                "steps_to_target": steps_to_target,
+            }
 
         except InBiotAPIError as e:
-            return create_data_unavailable_error(
-                device_name=device_config.name,
-                error_message=e.message,
-            )
+            return {"error": e.message, "device": device_config.name}
+
+    @mcp.tool()
+    async def compliance_over_time(
+        device: Annotated[str, Field(description="Device ID")],
+        start_date: Annotated[str, Field(description="Start date (YYYY-MM-DD)")],
+        end_date: Annotated[str, Field(description="End date (YYYY-MM-DD)")],
+    ) -> dict:
+        """
+        Evaluate sustained WELL compliance over a time period.
+
+        Unlike well_compliance_check (single snapshot), this analyzes every
+        measurement in the range and reports what percentage of the time each
+        parameter was compliant. Essential for real WELL certification which
+        requires sustained performance, not just a single good reading.
+        """
+        try:
+            device_config = validate_device(devices, device)
+        except ValueError as e:
+            return {"error": str(e)}
+
+        try:
+            start_dt = parse_date_param(start_date)
+            end_dt = parse_date_param(end_date, end_of_day=True)
+        except ValueError as e:
+            return {"error": f"Invalid date format: {e}. Use YYYY-MM-DD or ISO-8601 format."}
+
+        try:
+            data = await inbiot_client.get_historical_data(device_config, start_dt, end_dt)
+
+            parameters = []
+            total_compliant_hours = 0
+            total_hours = 0
+
+            for param in data:
+                if not param.measurements:
+                    continue
+
+                normalized = normalize_parameter_name(param.type)
+                threshold = get_threshold_for_parameter(normalized)
+                if not threshold:
+                    continue
+
+                compliant_count = 0
+                for m in param.measurements:
+                    val = m.numeric_value
+                    if is_range_based(normalized):
+                        ok = threshold["acceptable_min"] <= val <= threshold["acceptable_max"]
+                    elif is_higher_better(normalized):
+                        ok = val >= threshold["acceptable"]
+                    else:
+                        ok = val <= threshold["acceptable"]
+                    if ok:
+                        compliant_count += 1
+
+                total = len(param.measurements)
+                pct = round(compliant_count / total * 100, 1) if total > 0 else 0
+
+                # Find worst violation
+                if is_range_based(normalized):
+                    values = [m.numeric_value for m in param.measurements]
+                    worst = max(values, key=lambda v: max(
+                        threshold["acceptable_min"] - v if v < threshold["acceptable_min"] else 0,
+                        v - threshold["acceptable_max"] if v > threshold["acceptable_max"] else 0,
+                    ))
+                elif is_higher_better(normalized):
+                    worst = min(m.numeric_value for m in param.measurements)
+                else:
+                    worst = max(m.numeric_value for m in param.measurements)
+
+                parameters.append({
+                    "parameter": normalized,
+                    "unit": param.unit,
+                    "measurements": total,
+                    "compliant_count": compliant_count,
+                    "compliant_pct": pct,
+                    "worst_value": round(worst, 1),
+                    "sustained": pct >= 95,
+                })
+
+                total_compliant_hours += compliant_count
+                total_hours += total
+
+            overall_pct = round(total_compliant_hours / total_hours * 100, 1) if total_hours > 0 else 0
+
+            # Determine sustained level
+            if overall_pct >= 95:
+                sustained_level = "Sustained compliance"
+            elif overall_pct >= 80:
+                sustained_level = "Mostly compliant"
+            elif overall_pct >= 50:
+                sustained_level = "Intermittent compliance"
+            else:
+                sustained_level = "Non-compliant"
+
+            worst_params = sorted(parameters, key=lambda p: p["compliant_pct"])
+
+            return {
+                "device": device_config.name,
+                "period": {"start": start_date, "end": end_date},
+                "overall_compliant_pct": overall_pct,
+                "sustained_level": sustained_level,
+                "parameters": parameters,
+                "weakest_parameters": [
+                    {"parameter": p["parameter"], "compliant_pct": p["compliant_pct"]}
+                    for p in worst_params[:3]
+                    if p["compliant_pct"] < 100
+                ],
+            }
+
+        except InBiotAPIError as e:
+            return {"error": e.message, "device": device_config.name}
 
 
-def _get_context_aware_advice(parameter: str, value: float, unit: str, severity: str) -> str:
-    """Get context-aware advice with specific targets based on current value."""
+def _get_advice_dict(parameter: str, value: float, unit: str, severity: str) -> dict:
+    """Get structured advice based on current value and severity."""
     threshold = get_threshold_for_parameter(parameter)
 
     if not threshold:
-        return "- Review parameter and consult WELL guidelines\n"
+        return {"action": "Review parameter and consult WELL guidelines"}
 
-    result = ""
+    result = {}
 
     if is_range_based(parameter):
-        # Temperature/humidity - range-based
         optimal_min = threshold.get("optimal_min", 20)
         optimal_max = threshold.get("optimal_max", 24)
-
         if value < optimal_min:
-            diff = optimal_min - value
-            result += f"- Target: Increase by {diff:.1f} {unit} to reach optimal range ({optimal_min}-{optimal_max} {unit})\n"
-            if parameter == "temperature":
-                result += "- Action: Increase heating setpoint or check heating system\n"
-            elif parameter == "humidity":
-                result += "- Action: Activate humidification system\n"
+            result["target"] = f"Increase by {optimal_min - value:.1f} {unit} to optimal range ({optimal_min}-{optimal_max})"
         elif value > optimal_max:
-            diff = value - optimal_max
-            result += f"- Target: Reduce by {diff:.1f} {unit} to reach optimal range ({optimal_min}-{optimal_max} {unit})\n"
-            if parameter == "temperature":
-                result += "- Action: Increase cooling or improve ventilation\n"
-            elif parameter == "humidity":
-                result += "- Action: Activate dehumidification or increase ventilation\n"
-
+            result["target"] = f"Reduce by {value - optimal_max:.1f} {unit} to optimal range ({optimal_min}-{optimal_max})"
     elif is_higher_better(parameter):
-        # IAQ indicators - higher is better
         good_target = threshold.get("good", 60)
-        excellent_target = threshold.get("excellent", 80)
-
-        if value < good_target:
-            diff = good_target - value
-            result += f"- Target: Improve by {diff:.0f} points to reach 'Good' level ({good_target}+)\n"
-        else:
-            diff = excellent_target - value
-            result += f"- Target: Improve by {diff:.0f} points to reach 'Excellent' level ({excellent_target}+)\n"
-        result += "- Action: Address underlying air quality parameters\n"
-
+        result["target"] = f"Improve by {good_target - value:.0f} points to reach 'Good' level"
     else:
-        # Pollutants - lower is better
-        good_target = threshold.get("good", value * 0.8)
-        excellent_target = threshold.get("excellent", value * 0.5)
+        target_key = "good" if severity == "critical" else "excellent"
+        target_val = threshold.get(target_key, value * 0.8)
+        result["target"] = f"Reduce to {target_val} {unit} ({target_key} level)"
 
-        if severity == "critical":
-            diff = value - good_target
-            result += f"- Target: Reduce by {diff:.0f} {unit} to reach 'Good' level (≤{good_target} {unit})\n"
-        else:
-            diff = value - excellent_target
-            result += f"- Target: Reduce by {diff:.0f} {unit} to reach 'Excellent' level (≤{excellent_target} {unit})\n"
-
-        # Parameter-specific actions
-        if parameter == "co2":
-            result += "- Action: Increase outdoor air ventilation rate\n"
-            if value > 1000:
-                result += "- Consider: Reducing occupancy or adding demand-controlled ventilation\n"
-        elif parameter in ["pm25", "pm10", "pm1", "pm4"]:
-            result += "- Action: Check/replace HVAC filters (MERV 13+ recommended)\n"
-            result += "- Consider: Adding portable HEPA air purifiers\n"
-        elif parameter == "vocs":
-            result += "- Action: Increase ventilation and identify VOC sources\n"
-            result += "- Consider: Using low-VOC materials and products\n"
-        elif parameter == "formaldehyde":
-            result += "- Action: Increase ventilation and identify emission sources\n"
-            result += "- Consider: Removing or sealing formaldehyde-emitting materials\n"
+    # Parameter-specific actions
+    actions = {
+        "co2": "Increase outdoor air ventilation rate",
+        "pm25": "Check/replace HVAC filters (MERV 13+ recommended)",
+        "pm10": "Check/replace HVAC filters (MERV 13+ recommended)",
+        "vocs": "Increase ventilation and identify VOC sources",
+        "formaldehyde": "Increase ventilation and identify emission sources",
+        "temperature": "Adjust HVAC setpoint",
+        "humidity": "Adjust humidification/dehumidification system",
+    }
+    if parameter in actions:
+        result["action"] = actions[parameter]
 
     return result
-
-
-def _get_parameter_advice(parameter: str, severity: str) -> str:
-    """Legacy function - kept for backward compatibility."""
-    return _get_context_aware_advice(parameter, 0, "", severity)

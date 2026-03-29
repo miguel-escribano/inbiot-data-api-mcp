@@ -18,6 +18,7 @@ class DeviceConfigInput(BaseModel):
     system_id: str
     latitude: float = Field(ge=-90, le=90)
     longitude: float = Field(ge=-180, le=180)
+    building: Optional[str] = None
 
     @field_validator("latitude")
     @classmethod
@@ -82,6 +83,7 @@ class ConfigLoader:
                     api_key=device_input.api_key,
                     system_id=device_input.system_id,
                     coordinates=(device_input.latitude, device_input.longitude),
+                    building=device_input.building,
                 )
 
             return devices
@@ -127,6 +129,7 @@ class ConfigLoader:
                     api_key=device_input.api_key,
                     system_id=device_input.system_id,
                     coordinates=(device_input.latitude, device_input.longitude),
+                    building=device_input.building,
                 )
 
             return devices
@@ -170,11 +173,14 @@ class ConfigLoader:
             lat = float(os.environ.get(f"INBIOT_{device_id}_LAT", "0"))
             lon = float(os.environ.get(f"INBIOT_{device_id}_LON", "0"))
 
+            building = os.environ.get(f"INBIOT_{device_id}_BUILDING")
+
             devices[device_id] = DeviceConfig(
                 name=name,
                 api_key=api_key,
                 system_id=system_id,
                 coordinates=(lat, lon),
+                building=building,
             )
 
         return devices

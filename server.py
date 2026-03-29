@@ -9,8 +9,8 @@ import sys
 from dotenv import load_dotenv
 from fastmcp import FastMCP
 
-# Fix encoding for Windows console
-if sys.platform == 'win32':
+# Fix encoding for Windows console (skip under pytest to avoid capture conflicts)
+if sys.platform == 'win32' and "pytest" not in sys.modules:
     import io
     if hasattr(sys.stdout, 'buffer'):
         sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
@@ -21,9 +21,11 @@ if sys.platform == 'win32':
 load_dotenv()
 
 from src.api.inbiot import InBiotClient
+from src.api.openweather import OpenWeatherClient, OpenWeatherAPIError
 from src.well.compliance import WELLComplianceEngine
 from src.config.loader import ConfigLoader
 from src.config.validator import validate_devices, print_validation_warnings
+from src.utils.cache import AsyncTTLCache
 
 # Import skills
 from src.skills.monitoring import register_monitoring_tools
@@ -47,8 +49,19 @@ def load_devices():
 
 # Initialize
 DEVICES = load_devices()
-inbiot_client = InBiotClient()
+
+# Shared caches
+inbiot_cache = AsyncTTLCache()
+weather_cache = AsyncTTLCache()
+
+inbiot_client = InBiotClient(cache=inbiot_cache)
 well_engine = WELLComplianceEngine()
+
+# OpenWeather client (optional - may not have API key)
+try:
+    openweather_client = OpenWeatherClient(cache=weather_cache)
+except OpenWeatherAPIError:
+    openweather_client = None
 
 mcp = FastMCP(
     "inbiot-data-api",
@@ -62,7 +75,7 @@ mcp = FastMCP(
 register_monitoring_tools(mcp, DEVICES, inbiot_client)
 register_analytics_tools(mcp, DEVICES, inbiot_client)
 register_compliance_tools(mcp, DEVICES, inbiot_client, well_engine)
-register_weather_tools(mcp, DEVICES, inbiot_client)
+register_weather_tools(mcp, DEVICES, inbiot_client, openweather_client)
 
 
 def main():

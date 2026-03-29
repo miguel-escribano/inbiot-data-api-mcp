@@ -16,6 +16,7 @@ openweather_api_key: "your-openweather-api-key-here"
 #   - system_id: From My inBiot platform
 #   - latitude: Device location latitude (-90 to 90)
 #   - longitude: Device location longitude (-180 to 180)
+#   - building: (optional) Building or project name for grouping devices
 #
 # Find coordinates at: https://www.latlong.net/
 
@@ -27,6 +28,7 @@ devices:
     system_id: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
     latitude: 40.416775
     longitude: -3.703790
+    building: "HQ Madrid"
 
   # Example: Laboratory device
   lab:
@@ -35,6 +37,7 @@ devices:
     system_id: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
     latitude: 40.416775
     longitude: -3.703790
+    building: "HQ Madrid"
 
   # Add more devices as needed...
   # meeting_room:
