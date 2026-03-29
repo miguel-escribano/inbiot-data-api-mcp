@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 from typing import Optional
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class DeviceConfig(BaseModel):
@@ -60,31 +60,6 @@ class ParameterData(BaseModel):
         if not self.measurements:
             return None
         return self.measurements[-1].timestamp
-
-
-class ParameterAssessment(BaseModel):
-    """Assessment of a single parameter against WELL standards."""
-
-    parameter: str
-    value: float
-    unit: str
-    score: int  # 0-4 scale
-    level: str  # "Excellent", "Good", "Acceptable", "Poor", "Very Poor"
-    well_compliant: bool
-    threshold_used: str  # Which standard was applied
-
-
-class WELLAssessment(BaseModel):
-    """Complete WELL Building Standard compliance assessment."""
-
-    device_name: str
-    timestamp: datetime
-    overall_score: int
-    max_score: int
-    percentage: float
-    well_level: str  # "Platinum", "Gold", "Silver", "Bronze", "Below Standards"
-    parameters: list[ParameterAssessment]
-    recommendations: list[str] = []
 
 
 class OutdoorConditions(BaseModel):

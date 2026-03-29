@@ -5,7 +5,7 @@ import json
 from io import StringIO
 from typing import Dict, List
 
-from src.models.schemas import ParameterData, WELLAssessment
+from src.models.schemas import ParameterData
 
 
 class CSVExporter:
@@ -208,19 +208,6 @@ class JSONExporter:
         }
 
         return json.dumps(result, indent=2)
-
-    @staticmethod
-    def export_well_assessment(assessment: WELLAssessment) -> str:
-        """
-        Export WELL assessment to structured JSON.
-
-        Args:
-            assessment: WELL compliance assessment object
-
-        Returns:
-            JSON-formatted string with WELL assessment
-        """
-        return assessment.model_dump_json(indent=2)
 
     @staticmethod
     def export_multi_parameter_statistics(

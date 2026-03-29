@@ -1,14 +1,14 @@
-# inbiot-data-api-mcp (MCP Server)
+# inbiot-data-api-mcp
 
 **Repository:** [github.com/miguel-escribano/inbiot-data-api-mcp](https://github.com/miguel-escribano/inbiot-data-api-mcp)
 
 ## What is this?
 
-The data layer behind Anne, the IAQ consultant plugin. A stateless MCP server that wraps InBiot sensor APIs and OpenWeather into 14 structured tools for air quality monitoring and WELL Building Standard compliance.
+A stateless MCP server that wraps InBiot sensor APIs and OpenWeather into 9 structured tools for air quality monitoring. Raw data only — no scoring, no compliance logic, no recommendations.
 
 **No persona. No prompts. No resources.** Just clean JSON tools. Every tool is registered with read-only / non-destructive hints for MCP clients.
 
-The intelligence (Anne's persona, WELL knowledge, skill workflows) lives in the Anne plugin: [inbiot-Anne-IAQ-consultant-as-a-plugin](https://github.com/miguel-escribano/inbiot-Anne-IAQ-consultant-as-a-plugin). This server supplies raw data and scores; the plugin turns that into guidance.
+All intelligence (persona, WELL knowledge, compliance assessment, skill workflows) lives in the consumer layer. The primary consumer today is the Anne plugin: [inbiot-Anne-IAQ-consultant-as-a-plugin](https://github.com/miguel-escribano/inbiot-Anne-IAQ-consultant-as-a-plugin).
 
 ```
 ┌─────────────────────────────────┐     ┌──────────────────────────────────┐
@@ -16,10 +16,10 @@ The intelligence (Anne's persona, WELL knowledge, skill workflows) lives in the 
 │  inbiot-Anne-IAQ-consultant-... │     │  inbiot-data-api-mcp             │
 │                                 │     │                                  │
 │  CLAUDE.md  = Anne's persona    │────>│  server.py  = MCP entry point    │
-│  skills/    = slash commands    │ MCP │  src/api/   = HTTP clients       │
-│  knowledge/ = standards docs    │     │  src/tools/ = tool definitions    │
-│  hooks.json = session greeting  │     │  src/well/  = compliance engine  │
-│  .mcp.json  = server connection │     │  src/utils/ = cache, dates, etc  │
+│  skills/    = workflows         │ MCP │  src/api/   = HTTP clients       │
+│  knowledge/ = WELL thresholds   │     │  src/tools/ = tool definitions   │
+│  agents/    = agent config      │     │  src/utils/ = cache, dates, etc  │
+│  .mcp.json  = server connection │     │                                  │
 └─────────────────────────────────┘     └──────────────────────────────────┘
 ```
 
@@ -52,7 +52,7 @@ Merge this under `mcpServers` (create the key if missing):
 
 ### Other clients
 
-Use the same `command` / `args` block inside your app’s MCP config shape (e.g. Claude Desktop: `%APPDATA%\Claude\claude_desktop_config.json`; VS Code: `.vscode/mcp.json` or user MCP settings).
+Use the same `command` / `args` block inside your app's MCP config shape (e.g. Claude Desktop: `%APPDATA%\Claude\claude_desktop_config.json`; VS Code: `.vscode/mcp.json` or user MCP settings).
 
 | IDE / App | Config file |
 |-----------|-------------|
@@ -64,24 +64,19 @@ Use the same `command` / `args` block inside your app’s MCP config shape (e.g.
 
 ---
 
-## Tools (14)
+## Tools (9)
 
 | Group | Tool | What it does |
 |-------|------|-------------|
-| Monitoring | `list_devices` | List configured devices (`id`, `name`, optional `building` per row) |
+| Monitoring | `list_devices` | List configured devices (`id`, `name`, optional `building`) |
 | | `get_latest_measurements` | Current sensor values for one device |
 | | `get_historical_data` | Historical series with statistics and trend direction |
-| | `get_all_devices_summary` | All devices: key metrics (CO2, PM2.5, temperature, humidity, IAQ, thermal) as flat numeric fields; errors per device when a fetch fails |
+| | `get_all_devices_summary` | All devices: key metrics (CO2, PM2.5, temperature, humidity, IAQ, thermal) |
 | Analytics | `get_data_statistics` | Min/max/mean/median/quartiles/trend for a parameter over a range |
 | | `detect_patterns` | Hourly and daily patterns (peak hours, worst/best days) |
 | | `export_historical_data` | CSV or JSON export, raw or time-aggregated |
-| Compliance | `well_compliance_check` | WELL snapshot: overall score, %, level, per-parameter scores/levels (no narrative recommendation block in JSON) |
-| | `well_feature_compliance` | Per WELL feature (A01–A08, T01–T07): score, max, %, derived level, compliant flag |
-| | `health_recommendations` | Parameters at risk: score, severity, optional gap/target vs thresholds |
-| | `well_certification_roadmap` | Next certification tier, points needed, top ROI-style opportunities with gaps and targets |
-| | `compliance_over_time` | Sustained compliance % per parameter over a date range |
-| Weather | `outdoor_snapshot` | Outdoor weather + OpenWeather air payload for device coordinates |
-| | `indoor_vs_outdoor` | Side-by-side indoor vs outdoor; for PM2.5/PM10 includes `filtration_pct` when outdoor is above zero |
+| Weather | `outdoor_snapshot` | Outdoor weather + OpenWeather air quality for device coordinates |
+| | `indoor_vs_outdoor` | Side-by-side indoor vs outdoor with filtration effectiveness |
 
 All tools return JSON-friendly structures. Tool responses avoid Markdown so clients can parse them cheaply.
 
@@ -153,8 +148,6 @@ Both use **stdio** transport (typical for Cursor, Claude Code, and local MCP cli
 pytest tests/ -v
 ```
 
-**35** pytest tests; HTTP to InBiot/OpenWeather is mocked. (`tests/test_skills_integration.py` is a manual `python tests/test_skills_integration.py` helper, not part of the pytest suite.)
-
 </details>
 
 ---
@@ -170,41 +163,37 @@ src/
   tools/
     monitoring/tools.py         # 4 monitoring tools
     analytics/tools.py          # 3 analytics tools
-    compliance/tools.py         # 5 compliance tools
     weather/tools.py            # 2 weather tools
-  models/schemas.py             # Pydantic models (DeviceConfig, ParameterData, WELLAssessment...)
-  well/
-    compliance.py               # WELL compliance engine (scoring, levels, internal recommendations)
-    thresholds.py               # WELL/ASHRAE/WHO thresholds
-    features.py                 # WELL v2 feature definitions (A01-A08, T01-T07)
+  models/schemas.py             # Pydantic models (DeviceConfig, ParameterData, OutdoorConditions...)
   config/
     loader.py                   # YAML/JSON/env config loader
     validator.py                # Config validation
   utils/
     cache.py                    # AsyncTTLCache (in-memory, monotonic clock)
     aggregation.py              # Statistics and time-series aggregation
+    normalization.py            # Parameter name aliases (pm2.5->pm25, tvoc->vocs, etc.)
     exporters.py                # CSV/JSON export formatters
     retry.py                    # Exponential backoff for API calls
     dates.py                    # Date parsing for tool parameters
     validation.py               # Shared validation helpers
-    provenance.py               # Data provenance helpers
 tests/
   test_cache.py
   test_api_clients.py
-  test_compliance.py
   test_tools.py
   test_skills_integration.py    # manual smoke script (not collected by pytest)
 ```
 
 ---
 
-## Architecture evolution
+## Architecture note
 
-This server currently includes WELL compliance tools (`well_compliance_check`, `well_feature_compliance`, `well_certification_roadmap`, `health_recommendations`, `compliance_over_time`) alongside pure data tools. The compliance tools embed scoring logic and WELL/ASHRAE/WHO thresholds in Python (`src/well/`).
+This server is intentionally a **thin data pipe**. WELL compliance scoring, threshold interpretation, and health recommendations previously lived here but were moved to the plugin layer in March 2025. The rationale:
 
-The intended direction is to **move compliance intelligence to the plugin layer** (Anne or future agents), keeping the MCP as a thin, stable data API that any client can consume without inheriting opinions about standards interpretation. Thresholds and scoring criteria would live in editable Markdown maintained by domain experts rather than in server code.
+- Thresholds from WELL v2, ASHRAE 62.1/55, and WHO guidelines are normative data that domain experts (CSO, WELL APs) should review and tweak directly — easier in Markdown than in Python.
+- Different clients may interpret the same raw data differently depending on their context (certification prep vs daily monitoring vs sales demo).
+- Keeping the MCP stateless and opinion-free makes it a stable dependency for any number of consumers.
 
-**Possible future path:** once multiple MCP clients need consistent WELL scoring, the compliance engine could return as a versioned, well-documented service layer inside this server — providing reproducible assessments across all clients while still allowing the plugin to override or augment with its own interpretation.
+**If** multiple MCP clients eventually need consistent, reproducible WELL scoring, the compliance engine can return as a versioned service layer. Until then, the plugin's `knowledge/` files are the single source of truth for thresholds and interpretation.
 
 ---
 

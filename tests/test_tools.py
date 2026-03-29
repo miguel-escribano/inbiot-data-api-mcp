@@ -73,25 +73,8 @@ async def test_get_latest_measurements_unknown_device():
 
 
 @pytest.mark.asyncio
-async def test_well_compliance_check_unknown_device():
-    """Test well_compliance_check with unknown device."""
-    from server import mcp
-
-    async with Client(mcp) as client:
-        result = await client.call_tool(
-            "well_compliance_check",
-            {"device": "UNKNOWN_DEVICE"},
-        )
-        text = result.content[0].text
-
-        data = json.loads(text)
-        assert "error" in data
-        assert "Unknown device" in data["error"]
-
-
-@pytest.mark.asyncio
 async def test_list_tools():
-    """Test that all 14 expected tools are registered."""
+    """Test that all 9 expected tools are registered."""
     from server import mcp
 
     async with Client(mcp) as client:
@@ -106,11 +89,6 @@ async def test_list_tools():
             "get_data_statistics",
             "export_historical_data",
             "detect_patterns",
-            "well_compliance_check",
-            "well_feature_compliance",
-            "health_recommendations",
-            "well_certification_roadmap",
-            "compliance_over_time",
             "outdoor_snapshot",
             "indoor_vs_outdoor",
         ]
@@ -118,7 +96,6 @@ async def test_list_tools():
         for expected in expected_tools:
             assert expected in tool_names, f"Missing tool: {expected}"
 
-        # Verify we haven't accidentally registered extra tools
         assert len(tool_names) == len(expected_tools), (
             f"Expected {len(expected_tools)} tools, got {len(tool_names)}: {sorted(tool_names)}"
         )

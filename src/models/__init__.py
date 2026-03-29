@@ -4,17 +4,14 @@ from .schemas import (
     DeviceConfig,
     Measurement,
     ParameterData,
-    WELLAssessment,
-    ParameterAssessment,
     OutdoorConditions,
+    IndoorOutdoorComparison,
 )
 
 __all__ = [
     "DeviceConfig",
     "Measurement",
     "ParameterData",
-    "WELLAssessment",
-    "ParameterAssessment",
     "OutdoorConditions",
+    "IndoorOutdoorComparison",
 ]
-

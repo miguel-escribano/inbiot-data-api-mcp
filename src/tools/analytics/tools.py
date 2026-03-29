@@ -12,7 +12,7 @@ from src.utils.aggregation import DataAggregator
 from src.utils.dates import parse_date_param
 from src.utils.exporters import CSVExporter, JSONExporter
 from src.utils.validation import validate_device
-from src.well.thresholds import get_threshold_for_parameter, normalize_parameter_name
+from src.utils.normalization import normalize_parameter_name
 
 
 def register_analytics_tools(
@@ -197,7 +197,6 @@ def register_analytics_tools(
                 return {"error": f"No data found for parameter '{parameter}' in the specified date range."}
 
             measurements = param_data.measurements
-            threshold = get_threshold_for_parameter(normalized_param)
 
             # Aggregate by hour of day
             hourly_values = defaultdict(list)

@@ -11,7 +11,7 @@ from src.models.schemas import DeviceConfig
 from src.utils.aggregation import DataAggregator
 from src.utils.dates import parse_date_param
 from src.utils.validation import validate_device
-from src.well.thresholds import normalize_parameter_name
+from src.utils.normalization import normalize_parameter_name
 
 
 def register_monitoring_tools(
