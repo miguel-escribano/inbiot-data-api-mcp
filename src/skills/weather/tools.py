@@ -19,7 +19,7 @@ def register_weather_tools(
 ):
     """Register weather tools with the MCP server."""
 
-    @mcp.tool()
+    @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True})
     async def outdoor_snapshot(
         device: Annotated[str, Field(description="Device ID (uses device coordinates for location)")]
     ) -> dict:
@@ -27,7 +27,6 @@ def register_weather_tools(
         Get current outdoor weather and air quality conditions.
 
         Uses the device's configured coordinates to fetch outdoor data from OpenWeather.
-        This data is for contextual comparison only - NOT used for WELL indoor scoring.
         """
         try:
             device_config = validate_device(devices, device)
@@ -65,13 +64,12 @@ def register_weather_tools(
                     "co_ugm3": conditions.co,
                 },
                 "source": "OpenWeather API",
-                "note": "Outdoor data is for context only, NOT used for WELL indoor scoring.",
             }
 
         except OpenWeatherAPIError as e:
             return {"error": e.message}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True})
     async def indoor_vs_outdoor(
         device: Annotated[str, Field(description="Device ID for comparison")]
     ) -> dict:
@@ -126,5 +124,4 @@ def register_weather_tools(
         return {
             "device": device_config.name,
             "comparisons": comparisons,
-            "note": "Outdoor data is for context only, NOT used for WELL indoor scoring.",
         }

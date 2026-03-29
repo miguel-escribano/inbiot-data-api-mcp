@@ -19,6 +19,13 @@ from src.well.thresholds import (
 class WELLComplianceEngine:
     """Engine for assessing WELL Building Standard compliance."""
 
+    LEVEL_THRESHOLDS = {
+        "Platinum": 90,
+        "Gold": 75,
+        "Silver": 60,
+        "Bronze": 40,
+    }
+
     def assess(
         self, device_name: str, parameters: list[ParameterData]
     ) -> WELLAssessment:
@@ -40,7 +47,7 @@ class WELLComplianceEngine:
             if param.latest_value is None:
                 continue
 
-            assessment = self._assess_parameter(param)
+            assessment = self.assess_parameter(param)
             if assessment:
                 assessments.append(assessment)
                 total_score += assessment.score
@@ -48,9 +55,9 @@ class WELLComplianceEngine:
 
         # Calculate overall percentage and level
         percentage = (total_score / max_score * 100) if max_score > 0 else 0
-        well_level = self._determine_well_level(percentage)
+        well_level = self.determine_well_level(percentage)
 
-        # Generate recommendations
+        # Generate recommendations (kept internal, not surfaced in tool output)
         recommendations = self._generate_recommendations(assessments)
 
         return WELLAssessment(
@@ -64,7 +71,7 @@ class WELLComplianceEngine:
             recommendations=recommendations,
         )
 
-    def _assess_parameter(self, param: ParameterData) -> Optional[ParameterAssessment]:
+    def assess_parameter(self, param: ParameterData) -> Optional[ParameterAssessment]:
         """
         Assess a single parameter against WELL thresholds.
 
@@ -148,18 +155,12 @@ class WELLComplianceEngine:
         else:
             return 0, "Out of Range"
 
-    def _determine_well_level(self, percentage: float) -> str:
+    def determine_well_level(self, percentage: float) -> str:
         """Determine WELL certification level based on percentage score."""
-        if percentage >= 90:
-            return "WELL Platinum Eligible"
-        elif percentage >= 75:
-            return "WELL Gold Eligible"
-        elif percentage >= 60:
-            return "WELL Silver Eligible"
-        elif percentage >= 40:
-            return "WELL Bronze Eligible"
-        else:
-            return "Below WELL Standards"
+        for level, threshold in self.LEVEL_THRESHOLDS.items():
+            if percentage >= threshold:
+                return f"WELL {level} Eligible"
+        return "Below WELL Standards"
 
     def _generate_recommendations(
         self, assessments: list[ParameterAssessment]
@@ -172,24 +173,22 @@ class WELLComplianceEngine:
 
         for assessment in assessments:
             if assessment.score <= 1:
-                # Critical: Get feature-specific mitigation strategies
                 feature_ids = get_feature_for_parameter(assessment.parameter)
 
-                rec = f"🔴 **PRIORITY: {assessment.parameter.upper()}** is {assessment.level}\n"
+                rec = f"PRIORITY: {assessment.parameter.upper()} is {assessment.level}\n"
                 rec += f"   Current value: {assessment.value} {assessment.unit}\n"
 
                 for feature_id in feature_ids:
                     if feature_id in WELL_FEATURES:
                         feature = WELL_FEATURES[feature_id]
-                        rec += f"   **{feature.id} - {feature.name}**:\n"
-                        for strategy in feature.mitigation_strategies[:2]:  # Top 2 strategies
-                            rec += f"   • {strategy}\n"
+                        rec += f"   {feature.id} - {feature.name}:\n"
+                        for strategy in feature.mitigation_strategies[:2]:
+                            rec += f"   - {strategy}\n"
 
                 recommendations.append(rec)
 
             elif assessment.score == 2:
-                # Moderate: Suggest next tier target
-                rec = f"🟡 **{assessment.parameter.upper()}** is acceptable but could be improved\n"
+                rec = f"{assessment.parameter.upper()} is acceptable but could be improved\n"
                 rec += f"   Current value: {assessment.value} {assessment.unit}\n"
 
                 threshold = get_threshold_for_parameter(assessment.parameter)
@@ -201,9 +200,8 @@ class WELLComplianceEngine:
 
         if not recommendations:
             recommendations.append(
-                "✅ All parameters are within excellent or good ranges. "
+                "All parameters are within excellent or good ranges. "
                 "Maintain current conditions for WELL compliance."
             )
 
         return recommendations
-

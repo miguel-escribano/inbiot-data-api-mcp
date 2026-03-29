@@ -22,7 +22,7 @@ def register_analytics_tools(
 ):
     """Register analytics tools with the MCP server."""
 
-    @mcp.tool()
+    @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True})
     async def get_data_statistics(
         device: Annotated[str, Field(description="Device ID")],
         start_date: Annotated[str, Field(description="Start date (YYYY-MM-DD)")],
@@ -85,7 +85,7 @@ def register_analytics_tools(
         except InBiotAPIError as e:
             return {"error": e.message, "device": device_config.name}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True})
     async def export_historical_data(
         device: Annotated[str, Field(description="Device ID")],
         start_date: Annotated[str, Field(description="Start date (YYYY-MM-DD)")],
@@ -158,7 +158,7 @@ def register_analytics_tools(
         except InBiotAPIError as e:
             return {"error": e.message, "device": device_config.name}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True})
     async def detect_patterns(
         device: Annotated[str, Field(description="Device ID")],
         start_date: Annotated[str, Field(description="Start date (YYYY-MM-DD)")],

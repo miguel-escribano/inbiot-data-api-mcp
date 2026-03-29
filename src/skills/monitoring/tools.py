@@ -11,7 +11,7 @@ from src.models.schemas import DeviceConfig
 from src.utils.aggregation import DataAggregator
 from src.utils.dates import parse_date_param
 from src.utils.validation import validate_device
-from src.well.thresholds import get_threshold_for_parameter, normalize_parameter_name
+from src.well.thresholds import normalize_parameter_name
 
 
 def register_monitoring_tools(
@@ -21,7 +21,7 @@ def register_monitoring_tools(
 ):
     """Register monitoring tools with the MCP server."""
 
-    @mcp.tool()
+    @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
     def list_devices() -> dict:
         """
         List all available InBiot air quality monitoring devices.
@@ -36,7 +36,7 @@ def register_monitoring_tools(
             device_list.append(entry)
         return {"devices": device_list}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True})
     async def get_latest_measurements(
         device: Annotated[str, Field(description="Device ID (use list_devices to see options)")]
     ) -> dict:
@@ -71,7 +71,7 @@ def register_monitoring_tools(
         except InBiotAPIError as e:
             return {"error": e.message, "device": device_config.name}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True})
     async def get_historical_data(
         device: Annotated[str, Field(description="Device ID")],
         start_date: Annotated[str, Field(description="Start date (YYYY-MM-DD or ISO-8601)")],
@@ -126,16 +126,15 @@ def register_monitoring_tools(
         except InBiotAPIError as e:
             return {"error": e.message, "device": device_config.name}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True})
     async def get_all_devices_summary() -> dict:
         """
-        Get a summary of all devices with status indicators.
+        Get a summary of all devices with key parameter values.
 
-        Shows key parameters (CO2, PM2.5, temperature, IAQ) for all devices
-        in a single view, with status indicators highlighting devices that
-        need attention. Useful for quick facility-wide assessment.
+        Shows key parameters (CO2, PM2.5, temperature, humidity, IAQ, thermal)
+        for all devices in a single view. Useful for quick facility-wide assessment.
         """
-        key_params = ["co2", "pm25", "temperature", "iaq", "thermalindicator"]
+        key_params = ["co2", "pm25", "temperature", "humidity", "iaq", "thermalindicator"]
 
         async def fetch_device_data(device_id: str, config: DeviceConfig):
             try:
@@ -156,52 +155,10 @@ def register_monitoring_tools(
 
         for device_id, name, values, error in results:
             if error:
-                device_summaries.append({"id": device_id, "name": name, "status": "offline", "error": error})
+                device_summaries.append({"id": device_id, "name": name, "error": error})
                 continue
 
-            status = "good"
-
-            co2_entry = values.get("co2")
-            if co2_entry:
-                threshold = get_threshold_for_parameter("co2")
-                if threshold and co2_entry["value"] > threshold["acceptable"]:
-                    status = "alert"
-                elif threshold and co2_entry["value"] > threshold["good"]:
-                    if status != "alert":
-                        status = "warning"
-
-            pm25_entry = values.get("pm25")
-            if pm25_entry:
-                threshold = get_threshold_for_parameter("pm25")
-                if threshold and pm25_entry["value"] > threshold["acceptable"]:
-                    status = "alert"
-                elif threshold and pm25_entry["value"] > threshold["good"]:
-                    if status != "alert":
-                        status = "warning"
-
-            temp_entry = values.get("temperature")
-            if temp_entry:
-                threshold = get_threshold_for_parameter("temperature")
-                if threshold:
-                    tv = temp_entry["value"]
-                    if tv < threshold["acceptable_min"] or tv > threshold["acceptable_max"]:
-                        status = "alert"
-                    elif tv < threshold["optimal_min"] or tv > threshold["optimal_max"]:
-                        if status != "alert":
-                            status = "warning"
-
-            iaq_entry = values.get("iaq")
-            if iaq_entry:
-                if iaq_entry["value"] < 40:
-                    status = "alert"
-                elif iaq_entry["value"] < 60 and status != "alert":
-                    status = "warning"
-
-            summary = {
-                "id": device_id,
-                "name": name,
-                "status": status,
-            }
+            summary = {"id": device_id, "name": name}
             for k, v in values.items():
                 summary[k] = v["value"]
 
