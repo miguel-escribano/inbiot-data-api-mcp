@@ -28,10 +28,10 @@ from src.config.validator import validate_devices, print_validation_warnings
 from src.utils.cache import AsyncTTLCache
 
 # Import skills
-from src.skills.monitoring import register_monitoring_tools
-from src.skills.analytics import register_analytics_tools
-from src.skills.compliance import register_compliance_tools
-from src.skills.weather import register_weather_tools
+from src.tools.monitoring import register_monitoring_tools
+from src.tools.analytics import register_analytics_tools
+from src.tools.compliance import register_compliance_tools
+from src.tools.weather import register_weather_tools
 
 
 def load_devices():

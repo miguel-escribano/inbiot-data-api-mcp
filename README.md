@@ -17,7 +17,7 @@ The intelligence (Anne's persona, WELL knowledge, skill workflows) lives in the 
 │                                 │     │                                  │
 │  CLAUDE.md  = Anne's persona    │────>│  server.py  = MCP entry point    │
 │  skills/    = slash commands    │ MCP │  src/api/   = HTTP clients       │
-│  knowledge/ = standards docs    │     │  src/skills/= tool definitions   │
+│  knowledge/ = standards docs    │     │  src/tools/ = tool definitions    │
 │  hooks.json = session greeting  │     │  src/well/  = compliance engine  │
 │  .mcp.json  = server connection │     │  src/utils/ = cache, dates, etc  │
 └─────────────────────────────────┘     └──────────────────────────────────┘
@@ -167,7 +167,7 @@ src/
   api/
     inbiot.py                   # InBiot HTTP client (cached, connection-pooled)
     openweather.py              # OpenWeather HTTP client (cached, connection-pooled)
-  skills/
+  tools/
     monitoring/tools.py         # 4 monitoring tools
     analytics/tools.py          # 3 analytics tools
     compliance/tools.py         # 5 compliance tools
