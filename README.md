@@ -198,6 +198,16 @@ tests/
 
 ---
 
+## Architecture evolution
+
+This server currently includes WELL compliance tools (`well_compliance_check`, `well_feature_compliance`, `well_certification_roadmap`, `health_recommendations`, `compliance_over_time`) alongside pure data tools. The compliance tools embed scoring logic and WELL/ASHRAE/WHO thresholds in Python (`src/well/`).
+
+The intended direction is to **move compliance intelligence to the plugin layer** (Anne or future agents), keeping the MCP as a thin, stable data API that any client can consume without inheriting opinions about standards interpretation. Thresholds and scoring criteria would live in editable Markdown maintained by domain experts rather than in server code.
+
+**Possible future path:** once multiple MCP clients need consistent WELL scoring, the compliance engine could return as a versioned, well-documented service layer inside this server — providing reproducible assessments across all clients while still allowing the plugin to override or augment with its own interpretation.
+
+---
+
 ## Links
 
 - [This repo](https://github.com/miguel-escribano/inbiot-data-api-mcp) — MCP data server
