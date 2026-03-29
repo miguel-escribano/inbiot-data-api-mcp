@@ -59,13 +59,13 @@ Add this to your MCP configuration:
 | Monitoring | `list_devices` | List all configured devices (filterable by `building`) |
 | | `get_latest_measurements` | Current sensor values for one device |
 | | `get_historical_data` | Historical data with statistics and trend direction |
-| | `get_all_devices_summary` | All devices at a glance with status flags |
+| | `get_all_devices_summary` | All devices at a glance with key parameter values |
 | Analytics | `get_data_statistics` | Min/max/mean/median/quartiles/trend for any parameter |
 | | `detect_patterns` | Hourly and daily patterns (peak hours, worst days) |
 | | `export_historical_data` | CSV or JSON export, raw or time-aggregated |
 | Compliance | `well_compliance_check` | WELL assessment snapshot |
 | | `well_feature_compliance` | Per-feature breakdown (A01-A08, T01-T07) |
-| | `health_recommendations` | Actionable advice based on current readings |
+| | `health_recommendations` | Per-parameter scores, severity, and threshold gaps/targets |
 | | `well_certification_roadmap` | Prioritized path to next WELL certification level |
 | | `compliance_over_time` | Sustained compliance % over a date range |
 | Weather | `outdoor_snapshot` | Outdoor weather + air quality from OpenWeather |
