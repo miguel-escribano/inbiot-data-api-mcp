@@ -1,12 +1,14 @@
 # inbiot-data-api-mcp (MCP Server)
 
+**Repository:** [github.com/miguel-escribano/inbiot-data-api-mcp](https://github.com/miguel-escribano/inbiot-data-api-mcp)
+
 ## What is this?
 
 The data layer behind Anne, the IAQ consultant plugin. A stateless MCP server that wraps InBiot sensor APIs and OpenWeather into 14 structured tools for air quality monitoring and WELL Building Standard compliance.
 
-**No persona. No prompts. No resources.** Just clean JSON tools.
+**No persona. No prompts. No resources.** Just clean JSON tools. Every tool is registered with read-only / non-destructive hints for MCP clients.
 
-The intelligence (Anne's persona, WELL knowledge, skill workflows) lives in the plugin at `../inbiot-Anne-IAQ-consultant-as-a-plugin/`. This server is what gives Anne real data to work with.
+The intelligence (Anne's persona, WELL knowledge, skill workflows) lives in the Anne plugin: [inbiot-Anne-IAQ-consultant-as-a-plugin](https://github.com/miguel-escribano/inbiot-Anne-IAQ-consultant-as-a-plugin). This server supplies raw data and scores; the plugin turns that into guidance.
 
 ```
 ┌─────────────────────────────────┐     ┌──────────────────────────────────┐
@@ -25,28 +27,38 @@ The intelligence (Anne's persona, WELL knowledge, skill workflows) lives in the 
 
 ## Quick Start (Remote Server)
 
-The easiest way -- no installation. Just point your MCP client at the hosted server.
+No local install: point your MCP client at the hosted SSE endpoint (path is deployment-specific; token required).
 
-Add this to your MCP configuration:
+### Cursor (`%USERPROFILE%\.cursor\mcp.json`)
+
+Merge this under `mcpServers` (create the key if missing):
 
 ```json
-"inbiot-data-api-mcp": {
-  "command": "npx",
-  "args": [
-    "-y",
-    "mcp-remote",
-    "https://mcp.miguel-escribano.com/inbiot-mcp-for-Anne-IAQ-consultant-as-a-plugin/sse",
-    "--header",
-    "X-MCP-Token: <YOUR_TOKEN>"
-  ]
+{
+  "mcpServers": {
+    "inbiot-data-api-mcp": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://mcp.miguel-escribano.com/inbiot-mcp-for-Anne-IAQ-consultant-as-a-plugin/sse",
+        "--header",
+        "X-MCP-Token: <YOUR_TOKEN>"
+      ]
+    }
+  }
 }
 ```
+
+### Other clients
+
+Use the same `command` / `args` block inside your app’s MCP config shape (e.g. Claude Desktop: `%APPDATA%\Claude\claude_desktop_config.json`; VS Code: `.vscode/mcp.json` or user MCP settings).
 
 | IDE / App | Config file |
 |-----------|-------------|
 | **Cursor** | `%USERPROFILE%\.cursor\mcp.json` |
 | **Claude Desktop** | `%APPDATA%\Claude\claude_desktop_config.json` |
-| **VS Code** | `.vscode/mcp.json` in your project, or `Ctrl+Shift+P` -> MCP: Open User Configuration |
+| **VS Code** | `.vscode/mcp.json` or **MCP: Open User Configuration** |
 
 > **Requirements:** [Node.js 18+](https://nodejs.org/). To request a token, email **mescribano@inbiot.es**.
 
@@ -56,28 +68,28 @@ Add this to your MCP configuration:
 
 | Group | Tool | What it does |
 |-------|------|-------------|
-| Monitoring | `list_devices` | List all configured devices (filterable by `building`) |
+| Monitoring | `list_devices` | List configured devices (`id`, `name`, optional `building` per row) |
 | | `get_latest_measurements` | Current sensor values for one device |
-| | `get_historical_data` | Historical data with statistics and trend direction |
-| | `get_all_devices_summary` | All devices at a glance with key parameter values |
-| Analytics | `get_data_statistics` | Min/max/mean/median/quartiles/trend for any parameter |
-| | `detect_patterns` | Hourly and daily patterns (peak hours, worst days) |
+| | `get_historical_data` | Historical series with statistics and trend direction |
+| | `get_all_devices_summary` | All devices: key metrics (CO2, PM2.5, temperature, humidity, IAQ, thermal) as flat numeric fields; errors per device when a fetch fails |
+| Analytics | `get_data_statistics` | Min/max/mean/median/quartiles/trend for a parameter over a range |
+| | `detect_patterns` | Hourly and daily patterns (peak hours, worst/best days) |
 | | `export_historical_data` | CSV or JSON export, raw or time-aggregated |
-| Compliance | `well_compliance_check` | WELL assessment snapshot |
-| | `well_feature_compliance` | Per-feature breakdown (A01-A08, T01-T07) |
-| | `health_recommendations` | Per-parameter scores, severity, and threshold gaps/targets |
-| | `well_certification_roadmap` | Prioritized path to next WELL certification level |
-| | `compliance_over_time` | Sustained compliance % over a date range |
-| Weather | `outdoor_snapshot` | Outdoor weather + air quality from OpenWeather |
-| | `indoor_vs_outdoor` | Indoor vs outdoor comparison with filtration effectiveness % |
+| Compliance | `well_compliance_check` | WELL snapshot: overall score, %, level, per-parameter scores/levels (no narrative recommendation block in JSON) |
+| | `well_feature_compliance` | Per WELL feature (A01–A08, T01–T07): score, max, %, derived level, compliant flag |
+| | `health_recommendations` | Parameters at risk: score, severity, optional gap/target vs thresholds |
+| | `well_certification_roadmap` | Next certification tier, points needed, top ROI-style opportunities with gaps and targets |
+| | `compliance_over_time` | Sustained compliance % per parameter over a date range |
+| Weather | `outdoor_snapshot` | Outdoor weather + OpenWeather air payload for device coordinates |
+| | `indoor_vs_outdoor` | Side-by-side indoor vs outdoor; for PM2.5/PM10 includes `filtration_pct` when outdoor is above zero |
 
-All tools return JSON dicts. No Markdown in responses -- saves context tokens and keeps output machine-parseable.
+All tools return JSON-friendly structures. Tool responses avoid Markdown so clients can parse them cheaply.
 
 ---
 
 ## Key constraints
 
-- **InBiot API: 6 requests per device per hour.** The server uses a TTL cache (10 min for latest data, 60 min for historical, 5 min for weather) so consecutive tool calls for the same device reuse cached responses.
+- **InBiot API: 6 requests per device per hour.** The server uses a TTL cache (10 min for latest data, 60 min for historical, 5 min for weather) so repeated calls for the same device reuse cached responses.
 - **OpenWeather API key is optional.** Without it, `outdoor_snapshot` and `indoor_vs_outdoor` return a structured error dict instead of crashing the server.
 
 ---
@@ -128,14 +140,20 @@ Config can also be passed as JSON or environment variables -- see `src/config/lo
 ### Run
 
 ```bash
-python server.py    # stdio transport (default for Claude Code / local MCP clients)
+python server.py
+# or, after editable install:
+inbiot-data-api-mcp
 ```
+
+Both use **stdio** transport (typical for Cursor, Claude Code, and local MCP clients).
 
 ### Tests
 
 ```bash
-pytest tests/ -v    # 35 tests, no external API calls needed (all HTTP mocked)
+pytest tests/ -v
 ```
+
+**35** pytest tests; HTTP to InBiot/OpenWeather is mocked. (`tests/test_skills_integration.py` is a manual `python tests/test_skills_integration.py` helper, not part of the pytest suite.)
 
 </details>
 
@@ -156,7 +174,7 @@ src/
     weather/tools.py            # 2 weather tools
   models/schemas.py             # Pydantic models (DeviceConfig, ParameterData, WELLAssessment...)
   well/
-    compliance.py               # WELL compliance engine (scoring, levels, recommendations)
+    compliance.py               # WELL compliance engine (scoring, levels, internal recommendations)
     thresholds.py               # WELL/ASHRAE/WHO thresholds
     features.py                 # WELL v2 feature definitions (A01-A08, T01-T07)
   config/
@@ -167,23 +185,27 @@ src/
     aggregation.py              # Statistics and time-series aggregation
     exporters.py                # CSV/JSON export formatters
     retry.py                    # Exponential backoff for API calls
+    dates.py                    # Date parsing for tool parameters
+    validation.py               # Shared validation helpers
+    provenance.py               # Data provenance helpers
 tests/
   test_cache.py
   test_api_clients.py
   test_compliance.py
   test_tools.py
+  test_skills_integration.py    # manual smoke script (not collected by pytest)
 ```
 
 ---
 
 ## Links
 
-- [InBiot](https://www.inbiot.es/) -- Air quality monitoring devices
-- [My inBiot Platform](https://my.inbiot.es) -- Device management and API credentials
-- [WELL Building Standard](https://www.wellcertified.com/) -- Certification program
-- [Model Context Protocol](https://modelcontextprotocol.io/) -- MCP specification
-- [Plugin repo](../inbiot-Anne-IAQ-consultant-as-a-plugin/) -- Anne's persona and skills
-- [Previous monolithic version](../inBiot_MCP_with_WeatherAPI_and_WELL_standard/) -- Original combined repo
+- [This repo](https://github.com/miguel-escribano/inbiot-data-api-mcp) — MCP data server
+- [Anne plugin](https://github.com/miguel-escribano/inbiot-Anne-IAQ-consultant-as-a-plugin) — persona, skills, marketplace metadata
+- [InBiot](https://www.inbiot.es/) — Air quality monitoring devices
+- [My inBiot Platform](https://my.inbiot.es) — Device management and API credentials
+- [WELL Building Standard](https://www.wellcertified.com/) — Certification program
+- [Model Context Protocol](https://modelcontextprotocol.io/) — MCP specification
 
 ## License
 MIT
