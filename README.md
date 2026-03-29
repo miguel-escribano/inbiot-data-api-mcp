@@ -41,7 +41,7 @@ Merge this under `mcpServers` (create the key if missing):
       "args": [
         "-y",
         "mcp-remote",
-        "https://mcp.miguel-escribano.com/inbiot-mcp-for-Anne-IAQ-consultant-as-a-plugin/sse",
+        "https://mcp.miguel-escribano.com/inbiot-data-api-mcp/sse",
         "--header",
         "X-MCP-Token: <YOUR_TOKEN>"
       ]
