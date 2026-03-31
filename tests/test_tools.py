@@ -87,6 +87,7 @@ async def test_list_tools():
             "get_historical_data",
             "get_all_devices_summary",
             "get_data_statistics",
+            "calculate_go_iaqs_score",
             "export_historical_data",
             "detect_patterns",
             "outdoor_snapshot",
