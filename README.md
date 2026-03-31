@@ -4,7 +4,7 @@
 
 ## What is this?
 
-A stateless MCP server that wraps InBiot sensor APIs and OpenWeather into 9 structured tools for air quality monitoring. Raw data only — no scoring, no compliance logic, no recommendations.
+A stateless MCP server that wraps InBiot sensor APIs and OpenWeather into 10 structured tools for air quality monitoring and GO IAQS scoring. Raw data plus deterministic scoring — no compliance logic, no recommendations.
 
 **No persona. No prompts. No resources.** Just clean JSON tools. Every tool is registered with read-only / non-destructive hints for MCP clients.
 
@@ -64,7 +64,7 @@ Use the same `command` / `args` block inside your app's MCP config shape (e.g. C
 
 ---
 
-## Tools (9)
+## Tools (10)
 
 | Group | Tool | What it does |
 |-------|------|-------------|
@@ -75,6 +75,7 @@ Use the same `command` / `args` block inside your app's MCP config shape (e.g. C
 | Analytics | `get_data_statistics` | Min/max/mean/median/quartiles/trend for a parameter over a range |
 | | `detect_patterns` | Hourly and daily patterns (peak hours, worst/best days) |
 | | `export_historical_data` | CSV or JSON export, raw or time-aggregated |
+| Scoring | `calculate_go_iaqs_score` | GO IAQS Score (0–10) from live sensor data — per-pollutant sub-scores, tier, grade, dominant pollutant, health advice |
 | Weather | `outdoor_snapshot` | Outdoor weather + OpenWeather air quality for device coordinates |
 | | `indoor_vs_outdoor` | Side-by-side indoor vs outdoor with filtration effectiveness |
 
@@ -163,6 +164,8 @@ src/
   tools/
     monitoring/tools.py         # 4 monitoring tools
     analytics/tools.py          # 3 analytics tools
+    scoring/calculator.py       # GO IAQS Score engine (breakpoints, interpolation, synergy)
+    scoring/tools.py            # 1 scoring tool
     weather/tools.py            # 2 weather tools
   models/schemas.py             # Pydantic models (DeviceConfig, ParameterData, OutdoorConditions...)
   config/
@@ -180,6 +183,7 @@ tests/
   test_cache.py
   test_api_clients.py
   test_tools.py
+  test_go_iaqs.py               # 38 tests: white paper parity, synergy, boundaries, CH2O conversion
   test_skills_integration.py    # manual smoke script (not collected by pytest)
 ```
 
@@ -187,13 +191,11 @@ tests/
 
 ## Architecture note
 
-This server is intentionally a **thin data pipe**. WELL compliance scoring, threshold interpretation, and health recommendations previously lived here but were moved to the plugin layer in March 2025. The rationale:
+This server is intentionally a **thin data pipe**. WELL compliance scoring, threshold interpretation, and health recommendations live in the plugin layer — not here.
 
-- Thresholds from WELL v2, ASHRAE 62.1/55, and WHO guidelines are normative data that domain experts (CSO, WELL APs) should review and tweak directly — easier in Markdown than in Python.
-- Different clients may interpret the same raw data differently depending on their context (certification prep vs daily monitoring vs sales demo).
-- Keeping the MCP stateless and opinion-free makes it a stable dependency for any number of consumers.
+The one exception is the **GO IAQS Score** (`calculate_go_iaqs_score`). This was added as a deterministic scoring tool because the GO AQS methodology (piecewise linear interpolation, worst-pollutant-wins, synergistic reduction) is fully specified in the [GO AQS White Paper v1.0](https://goaqs.org/) and benefits from consistent, reproducible calculation. The scoring engine covers all 7 GO IAQS pollutants (PM2.5, CO2, CO, CH2O, O3, NO2, Radon) with 38 unit tests validated against the white paper's worked examples.
 
-**If** multiple MCP clients eventually need consistent, reproducible WELL scoring, the compliance engine can return as a versioned service layer. Until then, the plugin's `knowledge/` files are the single source of truth for thresholds and interpretation.
+WELL, EPBD, and other framework-specific interpretation remains in the plugin's `knowledge/` files, where domain experts can review and tweak thresholds directly.
 
 ---
 
