@@ -55,6 +55,7 @@ def register_monitoring_tools(
             data = await inbiot_client.get_latest_measurements(device_config)
 
             measurements = []
+            reading_timestamp = None
             for param in data:
                 if param.latest_value is not None:
                     measurements.append({
@@ -62,11 +63,17 @@ def register_monitoring_tools(
                         "value": param.latest_value,
                         "unit": param.unit,
                     })
+                    if reading_timestamp is None and param.latest_timestamp is not None:
+                        reading_timestamp = param.latest_timestamp.isoformat()
 
-            return {
+            result = {
                 "device": device_config.name,
                 "measurements": measurements,
             }
+            if reading_timestamp:
+                result["timestamp"] = reading_timestamp
+
+            return result
 
         except InBiotAPIError as e:
             return {"error": e.message, "device": device_config.name}
@@ -140,25 +147,30 @@ def register_monitoring_tools(
             try:
                 data = await inbiot_client.get_latest_measurements(config)
                 values = {}
+                device_timestamp = None
                 for param in data:
                     normalized = normalize_parameter_name(param.type)
                     if normalized in key_params and param.latest_value is not None:
                         values[normalized] = {"value": param.latest_value, "unit": param.unit}
-                return device_id, config.name, values, None
+                    if device_timestamp is None and param.latest_timestamp is not None:
+                        device_timestamp = param.latest_timestamp.isoformat()
+                return device_id, config.name, values, None, device_timestamp
             except InBiotAPIError as e:
-                return device_id, config.name, {}, e.message
+                return device_id, config.name, {}, e.message, None
 
         tasks = [fetch_device_data(did, cfg) for did, cfg in devices.items()]
         results = await asyncio.gather(*tasks)
 
         device_summaries = []
 
-        for device_id, name, values, error in results:
+        for device_id, name, values, error, timestamp in results:
             if error:
                 device_summaries.append({"id": device_id, "name": name, "error": error})
                 continue
 
             summary = {"id": device_id, "name": name}
+            if timestamp:
+                summary["timestamp"] = timestamp
             for k, v in values.items():
                 summary[k] = v["value"]
 
