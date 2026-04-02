@@ -1,9 +1,10 @@
 """
 GO IAQS Score calculator tests.
 
-Validates against the worked example in GO AQS White Paper v1.0 and
-additional edge cases covering synergistic reduction, boundary values,
-tier detection, and CH2O unit conversion.
+Validates against the worked examples in GO AQS White Paper v1.0
+(Appendix A experiments, Section worked example) and covers
+synergistic reduction, all pollutant boundary values, tier detection,
+CH2O unit conversion, and edge cases.
 """
 
 import pytest
@@ -11,6 +12,7 @@ import pytest
 from src.tools.scoring.calculator import (
     GoIaqsCalculator,
     interpolate,
+    POLLUTANT_ANCHORS,
     PM25_ANCHORS,
     CO2_ANCHORS,
     CO_ANCHORS,
@@ -24,42 +26,70 @@ calc = GoIaqsCalculator()
 
 
 # ---------------------------------------------------------------------------
-# Interpolation unit tests
+# Parametrized boundary tests — all 7 pollutants at every anchor point
+# Source: White Paper v1.0, Appendix D (pp. 82-83)
+# ---------------------------------------------------------------------------
+
+BOUNDARY_CASES = [
+    # (pollutant, concentration, expected_score)
+    # PM2.5 µg/m³: Good 0-10, Moderate 11-25, Unhealthy 26-100
+    ("pm25", 0, 10), ("pm25", 10, 8), ("pm25", 11, 7),
+    ("pm25", 25, 4), ("pm25", 26, 3), ("pm25", 100, 0),
+    # CO2 ppm: Good 400-800, Moderate 801-1400, Unhealthy 1401-5000
+    ("co2", 400, 10), ("co2", 800, 8), ("co2", 801, 7),
+    ("co2", 1400, 4), ("co2", 1401, 3), ("co2", 5000, 0),
+    # CO ppm: Good 0-1.7, Moderate 1.8-9.0, Unhealthy 9.1-31
+    ("co", 0, 10), ("co", 1.7, 8), ("co", 1.8, 7),
+    ("co", 9.0, 4), ("co", 9.1, 3), ("co", 31, 0),
+    # CH2O ppb: Good 0-27, Moderate 28-100, Unhealthy 101-500
+    ("ch2o", 0, 10), ("ch2o", 27, 8), ("ch2o", 28, 7),
+    ("ch2o", 100, 4), ("ch2o", 101, 3), ("ch2o", 500, 0),
+    # O3 ppb: Good 0-25, Moderate 26-100, Unhealthy 101-300
+    ("o3", 0, 10), ("o3", 25, 8), ("o3", 26, 7),
+    ("o3", 100, 4), ("o3", 101, 3), ("o3", 300, 0),
+    # NO2 ppb: Good 0-21, Moderate 22-100, Unhealthy 101-250
+    ("no2", 0, 10), ("no2", 21, 8), ("no2", 22, 7),
+    ("no2", 100, 4), ("no2", 101, 3), ("no2", 250, 0),
+    # Radon Bq/m³: Good 0-100, Moderate 101-150, Unhealthy 151-300
+    ("radon", 0, 10), ("radon", 100, 8), ("radon", 101, 7),
+    ("radon", 150, 4), ("radon", 151, 3), ("radon", 300, 0),
+]
+
+
+@pytest.mark.parametrize("pollutant,concentration,expected", BOUNDARY_CASES,
+                         ids=[f"{p}-{c}" for p, c, _ in BOUNDARY_CASES])
+def test_boundary_score(pollutant, concentration, expected):
+    assert calc.compute_sub_score(pollutant, concentration) == expected
+
+
+# Values beyond anchor range should clamp to nearest boundary score
+CLAMP_CASES = [
+    ("pm25", -5, 10), ("pm25", 200, 0),
+    ("co2", 300, 10), ("co2", 8000, 0),
+    ("co", -1, 10), ("co", 50, 0),
+    ("ch2o", -1, 10), ("ch2o", 999, 0),
+    ("o3", -1, 10), ("o3", 500, 0),
+    ("no2", -1, 10), ("no2", 400, 0),
+    ("radon", -1, 10), ("radon", 500, 0),
+]
+
+
+@pytest.mark.parametrize("pollutant,concentration,expected", CLAMP_CASES,
+                         ids=[f"{p}-clamp-{c}" for p, c, _ in CLAMP_CASES])
+def test_clamp_out_of_range(pollutant, concentration, expected):
+    assert calc.compute_sub_score(pollutant, concentration) == expected
+
+
+# ---------------------------------------------------------------------------
+# Original interpolation unit tests (kept for continuity)
 # ---------------------------------------------------------------------------
 
 class TestInterpolation:
-    def test_pm25_below_range(self):
-        assert interpolate(0, PM25_ANCHORS) == 10
-
-    def test_pm25_above_range(self):
-        assert interpolate(100, PM25_ANCHORS) == 0
-
     def test_pm25_beyond_max(self):
         assert interpolate(200, PM25_ANCHORS) == 0
 
-    def test_pm25_at_good_boundary(self):
-        assert interpolate(10, PM25_ANCHORS) == 8
-
-    def test_pm25_at_moderate_start(self):
-        assert interpolate(11, PM25_ANCHORS) == 7
-
-    def test_pm25_at_moderate_end(self):
-        assert interpolate(25, PM25_ANCHORS) == 4
-
-    def test_pm25_at_unhealthy_start(self):
-        assert interpolate(26, PM25_ANCHORS) == 3
-
     def test_co2_below_range(self):
         assert interpolate(300, CO2_ANCHORS) == 10
-
-    def test_co2_at_lower_bound(self):
-        assert interpolate(400, CO2_ANCHORS) == 10
-
-    def test_co2_at_good_boundary(self):
-        assert interpolate(800, CO2_ANCHORS) == 8
-
-    def test_co2_at_moderate_start(self):
-        assert interpolate(801, CO2_ANCHORS) == 7
 
 
 # ---------------------------------------------------------------------------
@@ -247,3 +277,85 @@ class TestDominantPollutant:
         })
         # O3 at 20 ppb → score 9 (closest to boundary), others score 10
         assert result.dominant_pollutant == ["o3"]
+
+
+# ---------------------------------------------------------------------------
+# Edge cases
+# ---------------------------------------------------------------------------
+
+class TestEdgeCases:
+    def test_empty_measurements(self):
+        result = calc.calculate({})
+        assert result.total_score == 0
+        assert result.pollutants_measured == 0
+        assert result.tier == "starter"
+        assert len(result.missing) == 7
+        assert result.dominant_pollutant == []
+        assert result.synergistic_reduction is False
+
+    def test_single_pollutant(self):
+        result = calc.calculate({"pm25": 5})
+        assert result.total_score == 9  # 5 µg/m³ interpolates to 9 in Good band
+        assert result.pollutants_measured == 1
+        assert result.tier == "starter"
+        assert result.synergistic_reduction is False
+        assert result.dominant_pollutant == ["pm25"]
+
+    def test_unknown_pollutant_ignored(self):
+        result = calc.calculate({"pm25": 5, "tvoc": 300})
+        assert result.pollutants_measured == 1
+        assert "tvoc" not in result.sub_scores
+
+    def test_hcho_alias_through_sensor_flow(self):
+        """Verify the full alias chain: hcho → formaldehyde → ch2o."""
+        sensor_data = [
+            {"parameter": "hcho", "value": 33.0, "unit": "µg/m³"},
+            {"parameter": "pm2.5", "value": 5.0, "unit": "µg/m³"},
+            {"parameter": "co2", "value": 600, "unit": "ppm"},
+        ]
+        result = calc.calculate_from_sensor(sensor_data)
+        assert "ch2o" in result.sub_scores
+        ch2o_ps = result.sub_scores["ch2o"]
+        assert ch2o_ps.value == 33.0
+        assert ch2o_ps.unit == "µg/m³"
+        assert abs(ch2o_ps.converted_ppb - 26.9) < 0.1
+
+    def test_non_numeric_value_skipped(self):
+        sensor_data = [
+            {"parameter": "co2", "value": "N/A", "unit": "ppm"},
+            {"parameter": "pm2.5", "value": 5.0, "unit": "µg/m³"},
+        ]
+        result = calc.calculate_from_sensor(sensor_data)
+        assert "co2" not in result.sub_scores
+        assert result.pollutants_measured == 1
+
+
+# ---------------------------------------------------------------------------
+# White Paper Appendix A — Playground experiments
+# Source: GO AQS White Paper v1.0, Appendix A (p. 79)
+# ---------------------------------------------------------------------------
+
+class TestWhitePaperExperiments:
+    def test_experiment_1_low_concentrations(self):
+        """Exp 1: low concentrations across all pollutants → Score 8."""
+        result = calc.calculate({
+            "pm25": 6, "co2": 500, "co": 1.0,
+            "ch2o": 25, "o3": 20, "no2": 20, "radon": 40,
+        })
+        assert result.total_score == 8
+        assert result.category == "Good"
+
+    def test_experiment_7_equal_moderate_synergy(self):
+        """White Paper Appendix A, Experiment 7: "Equally moderate values
+        to test the Dutch AQI and GO IAQS logic."
+
+        All measured pollutants score 6 → synergy → GO IAQS Score = 5.
+        Concentrations chosen to produce score 6 in each Moderate band.
+        """
+        result = calc.calculate({
+            "pm25": 15.67, "co2": 1000, "co": 5.0, "ch2o": 60,
+        })
+        scores = [ps.score for ps in result.sub_scores.values()]
+        assert all(s == 6 for s in scores)
+        assert result.synergistic_reduction is True
+        assert result.total_score == 5

@@ -74,7 +74,7 @@ async def test_get_latest_measurements_unknown_device():
 
 @pytest.mark.asyncio
 async def test_list_tools():
-    """Test that all 9 expected tools are registered."""
+    """Test that all 11 expected tools are registered."""
     from server import mcp
 
     async with Client(mcp) as client:
@@ -88,6 +88,7 @@ async def test_list_tools():
             "get_all_devices_summary",
             "get_data_statistics",
             "calculate_go_iaqs_score",
+            "check_go_iaqs_compliance",
             "export_historical_data",
             "detect_patterns",
             "outdoor_snapshot",

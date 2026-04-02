@@ -199,7 +199,7 @@ class GoIaqsCalculator:
 
     @staticmethod
     def determine_tier(measured_keys: set[str]) -> str:
-        """Starter = only PM2.5 + CO2; Ultimate = 5+ pollutants."""
+        """Starter = only PM2.5 and/or CO2; Ultimate = any pollutant beyond Starter set."""
         if measured_keys <= STARTER_POLLUTANTS:
             return "starter"
         return "ultimate"

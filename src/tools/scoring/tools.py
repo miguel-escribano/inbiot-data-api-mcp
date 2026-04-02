@@ -1,5 +1,6 @@
-"""MCP tool for GO IAQS Score calculation from live sensor data."""
+"""MCP tools for GO IAQS Score and Compliance from live sensor data."""
 
+from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 from fastmcp import FastMCP
@@ -8,7 +9,12 @@ from pydantic import Field
 from src.api.inbiot import InBiotClient, InBiotAPIError
 from src.models.schemas import DeviceConfig
 from src.utils.validation import validate_device
+from src.utils.normalization import normalize_parameter_name
 from src.tools.scoring.calculator import GoIaqsCalculator
+from src.tools.scoring.compliance import (
+    MAX_LOOKBACK_HOURS,
+    build_compliance_result,
+)
 
 
 def register_scoring_tools(
@@ -91,6 +97,70 @@ def register_scoring_tools(
                 response["timestamp"] = reading_timestamp
 
             return response
+
+        except InBiotAPIError as e:
+            return {"error": e.message, "device": device_config.name}
+
+
+    @mcp.tool(annotations={
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    })
+    async def check_go_iaqs_compliance(
+        device: Annotated[str, Field(
+            description="Device ID (use list_devices to see options)"
+        )],
+    ) -> dict:
+        """
+        Check GO IAQS compliance for a device over the last 24 hours.
+
+        Returns hourly time series data for both Starter and Ultimate tiers,
+        with rolling averages computed at the correct averaging period for
+        each pollutant (24h for Starter PM2.5, 1h for Ultimate PM2.5,
+        8h for O3/CO/NO2, etc.). Threshold pollutants (CO2, CH2O, Radon)
+        use hourly means directly.
+
+        The tier is auto-detected from available pollutants. Starter data is
+        always returned. Ultimate data is returned only when the sensor
+        measures pollutants beyond PM2.5 and CO2.
+
+        Temperature and humidity are included as context (no limits).
+
+        Designed for chart rendering: the response contains flat arrays
+        (hours, rolling_avg, hourly_mean, status) that map directly to
+        time series chart data points.
+
+        Fetches 48 hours of historical data (1 API call, cached 60 min)
+        to ensure rolling averages are computable at the start of the
+        24-hour chart window.
+        """
+        try:
+            device_config = validate_device(devices, device)
+        except ValueError as e:
+            return {"error": str(e)}
+
+        try:
+            now = datetime.now(tz=timezone.utc)
+            start = now - timedelta(hours=MAX_LOOKBACK_HOURS)
+
+            historical = await inbiot_client.get_historical_data(
+                device_config, start, now,
+            )
+
+            param_data: dict[str, tuple[list, str]] = {}
+            for param in historical:
+                if param.measurements:
+                    normalized = normalize_parameter_name(param.type)
+                    param_data[normalized] = (param.measurements, param.unit)
+
+            result = build_compliance_result(param_data, now)
+
+            return {
+                "device": device_config.name,
+                "compliance": result,
+            }
 
         except InBiotAPIError as e:
             return {"error": e.message, "device": device_config.name}
