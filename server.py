@@ -21,6 +21,7 @@ load_dotenv()
 
 from src.api.inbiot import InBiotClient
 from src.api.openweather import OpenWeatherClient, OpenWeatherAPIError
+from src.api.forecasting import ForecastingClient, ForecastingAPIError
 from src.config.loader import ConfigLoader
 from src.config.validator import validate_devices, print_validation_warnings
 from src.utils.cache import AsyncTTLCache
@@ -29,6 +30,7 @@ from src.tools.monitoring import register_monitoring_tools
 from src.tools.analytics import register_analytics_tools
 from src.tools.weather import register_weather_tools
 from src.tools.scoring import register_scoring_tools
+from src.tools.forecasting import register_forecasting_tools
 
 
 def load_devices():
@@ -48,6 +50,7 @@ DEVICES = load_devices()
 
 inbiot_cache = AsyncTTLCache()
 weather_cache = AsyncTTLCache()
+forecast_cache = AsyncTTLCache()
 
 inbiot_client = InBiotClient(cache=inbiot_cache)
 
@@ -56,11 +59,17 @@ try:
 except OpenWeatherAPIError:
     openweather_client = None
 
+try:
+    forecasting_client = ForecastingClient(cache=forecast_cache)
+except ForecastingAPIError:
+    forecasting_client = None
+
 mcp = FastMCP(
     "inbiot-data-api-mcp",
     instructions=(
         "Stateless data API for InBiot sensor readings, outdoor weather, "
-        "and GO IAQS scoring. Returns raw data and deterministic scores only. "
+        "GO IAQS scoring, and CO2 forecasting. Returns raw data, "
+        "deterministic scores, and model predictions only. "
         "No compliance logic, no recommendations."
     ),
 )
@@ -69,6 +78,7 @@ register_monitoring_tools(mcp, DEVICES, inbiot_client)
 register_analytics_tools(mcp, DEVICES, inbiot_client)
 register_weather_tools(mcp, DEVICES, inbiot_client, openweather_client)
 register_scoring_tools(mcp, DEVICES, inbiot_client)
+register_forecasting_tools(mcp, DEVICES, inbiot_client, forecasting_client)
 
 
 def main():

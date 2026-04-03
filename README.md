@@ -4,7 +4,7 @@
 
 ## What is this?
 
-A stateless MCP server that wraps InBiot sensor APIs and OpenWeather into 12 structured tools for air quality monitoring, outdoor forecasting, and GO IAQS scoring. Raw data plus deterministic scoring — no compliance logic, no recommendations.
+A stateless MCP server that wraps InBiot sensor APIs, OpenWeather, and a Chronos-2 forecasting endpoint into 14 structured tools for air quality monitoring, outdoor weather context, GO IAQS scoring, and CO2 forecasting. Raw data, deterministic scoring, and model predictions — no compliance logic, no recommendations.
 
 **No persona. No prompts. No resources.** Just clean JSON tools. Every tool is registered with read-only / non-destructive hints for MCP clients.
 
@@ -20,7 +20,15 @@ All intelligence (persona, WELL knowledge, compliance assessment, skill workflow
 │  knowledge/ = WELL thresholds   │     │  src/tools/ = tool definitions   │
 │  agents/    = agent config      │     │  src/utils/ = cache, dates, etc  │
 │  .mcp.json  = server connection │     │                                  │
-└─────────────────────────────────┘     └──────────────────────────────────┘
+└─────────────────────────────────┘     └──────────────┬───────────────────┘
+                                                       │ HTTP
+                                        ┌──────────────▼───────────────────┐
+                                        │  HuggingFace Space (model)       │
+                                        │  chronos-co2-forecast            │
+                                        │                                  │
+                                        │  Chronos-2-small (28M params)    │
+                                        │  Gradio API on free CPU tier     │
+                                        └──────────────────────────────────┘
 ```
 
 ---
@@ -50,7 +58,7 @@ We maintain a hosted instance at `mcp.miguel-escribano.com` with pre-configured 
 
 ---
 
-## Tools (12)
+## Tools (14)
 
 | Group | Tool | What it does |
 |-------|------|-------------|
@@ -62,10 +70,12 @@ We maintain a hosted instance at `mcp.miguel-escribano.com` with pre-configured 
 | | `detect_patterns` | Hourly and daily patterns (peak hours, worst/best days) |
 | | `export_historical_data` | CSV or JSON export, raw or time-aggregated |
 | Scoring | `calculate_go_iaqs_score` | GO IAQS Score (0-10) from live sensor data — per-pollutant sub-scores, tier, grade, dominant pollutant, health advice |
+| | `check_go_iaqs_compliance` | 24h rolling compliance check against GO IAQS thresholds |
 | Weather | `outdoor_snapshot` | Outdoor weather + air quality for device coordinates (all pollutants: PM2.5, PM10, O3, NO2, NO, SO2, CO, NH3) |
 | | `indoor_vs_outdoor` | Side-by-side indoor vs outdoor with filtration effectiveness |
 | | `outdoor_forecast` | 4-day hourly air quality forecast — best/worst ventilation windows |
 | | `outdoor_history` | Historical outdoor AQ for a time range (up to 7 days) — correlate with indoor events |
+| Forecasting | `forecast_co2` | Predict future CO2 levels (10min–4h) via Chronos-2-small. Returns median + 80% confidence interval + threshold crossing alerts |
 
 All tools return JSON-friendly structures. Tool responses avoid Markdown so clients can parse them cheaply.
 
@@ -75,6 +85,7 @@ All tools return JSON-friendly structures. Tool responses avoid Markdown so clie
 
 - **InBiot API: 6 requests per device per hour.** The server uses a TTL cache (10 min for latest data, 60 min for historical, 5 min for weather) so repeated calls for the same device reuse cached responses.
 - **OpenWeather API key is optional.** Without it, `outdoor_snapshot` and `indoor_vs_outdoor` return a structured error dict instead of crashing the server.
+- **HuggingFace endpoint is optional.** Without it, `forecast_co2` returns a structured error dict. The default endpoint is a free HuggingFace Space running Chronos-2-small — no API key required, but it sleeps after 48h of inactivity (first call after sleep takes ~60s).
 
 ---
 
@@ -97,6 +108,8 @@ Create `inbiot-config.yaml` in the project root:
 
 ```yaml
 openweather_api_key: "your-key"    # optional
+
+huggingface_endpoint_url: "https://miguel-escribano-chronos-co2-forecast.hf.space"  # optional, for CO2 forecasting
 
 devices:
   office:
@@ -201,15 +214,17 @@ src/
   api/
     inbiot.py                   # InBiot HTTP client (cached, connection-pooled)
     openweather.py              # OpenWeather HTTP client (cached, connection-pooled)
+    forecasting.py              # HuggingFace endpoint client (Gradio Space or Inference Endpoint)
   tools/
     monitoring/tools.py         # 4 monitoring tools
     analytics/tools.py          # 3 analytics tools
     weather/tools.py            # 4 weather tools (snapshot, comparison, forecast, history)
     scoring/calculator.py       # GO IAQS Score engine (breakpoints, interpolation, synergy)
-    scoring/tools.py            # 1 scoring tool
-  models/schemas.py             # Pydantic models (DeviceConfig, ParameterData, OutdoorConditions...)
+    scoring/tools.py            # 2 scoring tools
+    forecasting/tools.py        # 1 forecasting tool (CO2 prediction via Chronos-2)
+  models/schemas.py             # Pydantic models (DeviceConfig, ParameterData, CO2Forecast...)
   config/
-    loader.py                   # YAML/JSON/env config loader
+    loader.py                   # YAML/JSON/env config loader (InBiot + OpenWeather + HF)
     validator.py                # Config validation
   utils/
     cache.py                    # AsyncTTLCache (in-memory, monotonic clock)
@@ -233,7 +248,11 @@ tests/
 
 This server is intentionally a **thin data pipe**. WELL compliance scoring, threshold interpretation, and health recommendations live in the plugin layer — not here.
 
-The one exception is the **GO IAQS Score** (`calculate_go_iaqs_score`). This was added as a deterministic scoring tool because the GO AQS methodology (piecewise linear interpolation, worst-pollutant-wins, synergistic reduction) is fully specified in the [GO AQS White Paper v1.0](https://goaqs.org/) and benefits from consistent, reproducible calculation. The scoring engine covers all 7 GO IAQS pollutants (PM2.5, CO2, CO, CH2O, O3, NO2, Radon) with 38 unit tests validated against the white paper's worked examples.
+There are two exceptions:
+
+1. **GO IAQS Score** (`calculate_go_iaqs_score`). Deterministic scoring — the GO AQS methodology (piecewise linear interpolation, worst-pollutant-wins, synergistic reduction) is fully specified in the [GO AQS White Paper v1.0](https://goaqs.org/) and benefits from consistent, reproducible calculation. The scoring engine covers all 7 GO IAQS pollutants (PM2.5, CO2, CO, CH2O, O3, NO2, Radon) with 38 unit tests validated against the white paper's worked examples.
+
+2. **CO2 Forecasting** (`forecast_co2`). Calls a remote [Chronos-2-small](https://huggingface.co/autogluon/chronos-2-small) model hosted on a HuggingFace Space. The server sends 24h of CO2 history and receives quantile predictions — no ML dependencies in the MCP server itself. The approach is validated by [Garcia-Pinilla et al. (2026)](https://doi.org/10.3390/forecasting8010026) who benchmarked Chronos models for indoor CO2 forecasting using InBiot MICA data.
 
 WELL, EPBD, and other framework-specific interpretation remains in the plugin's `knowledge/` files, where domain experts can review and tweak thresholds directly.
 
@@ -243,6 +262,7 @@ WELL, EPBD, and other framework-specific interpretation remains in the plugin's 
 
 - [This repo](https://github.com/miguel-escribano/inbiot-data-api-mcp) — MCP data server
 - [Anne plugin](https://github.com/miguel-escribano/inbiot-Anne-IAQ-consultant-as-a-plugin) — persona, skills, marketplace metadata
+- [Chronos-2 CO2 Forecast Space](https://huggingface.co/spaces/miguel-escribano/chronos-co2-forecast) — HuggingFace Space serving the forecasting model
 - [InBiot](https://www.inbiot.es/) — Air quality monitoring devices
 - [My inBiot Platform](https://my.inbiot.es) — Device management and API credentials
 - [WELL Building Standard](https://www.wellcertified.com/) — Certification program

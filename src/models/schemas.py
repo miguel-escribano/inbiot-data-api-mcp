@@ -100,3 +100,29 @@ class IndoorOutdoorComparison(BaseModel):
     deltas: dict[str, float]  # Indoor - Outdoor differences
     filtration_effectiveness: dict[str, str]  # Assessment per parameter
 
+
+class ThresholdCrossing(BaseModel):
+    """Predicted time when a threshold will be crossed."""
+
+    threshold_ppm: int
+    minutes_until: Optional[int] = None
+    predicted_value: Optional[float] = None
+    confidence: str = "median"
+
+
+class CO2Forecast(BaseModel):
+    """Structured CO2 forecast result."""
+
+    device_name: str
+    horizon: str
+    steps: int
+    interval_minutes: int = 10
+    current_co2: Optional[float] = None
+    current_timestamp: Optional[str] = None
+    median: list[float] = Field(default_factory=list)
+    lower_bound: list[float] = Field(default_factory=list)
+    upper_bound: list[float] = Field(default_factory=list)
+    threshold_crossings: list[ThresholdCrossing] = Field(default_factory=list)
+    context_points_used: int = 0
+    model: str = "chronos-2-small"
+

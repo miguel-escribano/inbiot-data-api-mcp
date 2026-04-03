@@ -42,6 +42,8 @@ class ConfigFile(BaseModel):
 
     devices: Dict[str, DeviceConfigInput]
     openweather_api_key: Optional[str] = None
+    huggingface_endpoint_url: Optional[str] = None
+    huggingface_api_key: Optional[str] = None
 
 
 class ConfigLoader:
@@ -71,11 +73,13 @@ class ConfigLoader:
 
             config = ConfigFile.model_validate(raw_config)
 
-            # Set OpenWeather API key if provided
             if config.openweather_api_key:
                 os.environ["OPENWEATHER_API_KEY"] = config.openweather_api_key
+            if config.huggingface_endpoint_url:
+                os.environ["HF_ENDPOINT_URL"] = config.huggingface_endpoint_url
+            if config.huggingface_api_key:
+                os.environ["HF_API_KEY"] = config.huggingface_api_key
 
-            # Convert to DeviceConfig format
             devices = {}
             for device_id, device_input in config.devices.items():
                 devices[device_id] = DeviceConfig(
@@ -117,11 +121,13 @@ class ConfigLoader:
 
             config = ConfigFile.model_validate(raw_config)
 
-            # Set OpenWeather API key if provided
             if config.openweather_api_key:
                 os.environ["OPENWEATHER_API_KEY"] = config.openweather_api_key
+            if config.huggingface_endpoint_url:
+                os.environ["HF_ENDPOINT_URL"] = config.huggingface_endpoint_url
+            if config.huggingface_api_key:
+                os.environ["HF_API_KEY"] = config.huggingface_api_key
 
-            # Convert to DeviceConfig format
             devices = {}
             for device_id, device_input in config.devices.items():
                 devices[device_id] = DeviceConfig(
