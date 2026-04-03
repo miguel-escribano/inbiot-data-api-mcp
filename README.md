@@ -25,42 +25,28 @@ All intelligence (persona, WELL knowledge, compliance assessment, skill workflow
 
 ---
 
-## Quick Start (Remote Server)
+## Two ways to use this server
 
-No local install: point your MCP client at the hosted SSE endpoint (path is deployment-specific; token required).
+### Option A — Run it yourself (self-hosted)
 
-### Cursor (`%USERPROFILE%\.cursor\mcp.json`)
+Clone the repo, configure your own InBiot device credentials, and run it locally or on your own server. The server uses **stdio** transport, which works directly with Cursor, Claude Code, Claude Desktop, and other MCP clients.
 
-Merge this under `mcpServers` (create the key if missing):
+**You need:** Python 3.10+, at least one [InBiot MICA](https://www.inbiot.es/) device with API credentials from [My inBiot](https://my.inbiot.es).
 
-```json
-{
-  "mcpServers": {
-    "inbiot-data-api-mcp": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "mcp-remote",
-        "https://mcp.miguel-escribano.com/inbiot-data-api-mcp/sse",
-        "--header",
-        "X-MCP-Token: <YOUR_TOKEN>"
-      ]
-    }
-  }
-}
-```
+[Jump to setup instructions](#self-hosted-setup)
 
-### Other clients
+### Option B — Try the demo server (hosted)
 
-Use the same `command` / `args` block inside your app's MCP config shape (e.g. Claude Desktop: `%APPDATA%\Claude\claude_desktop_config.json`; VS Code: `.vscode/mcp.json` or user MCP settings).
+We maintain a hosted instance at `mcp.miguel-escribano.com` with pre-configured devices and weather data, so you can explore the tools without owning any hardware.
 
-| IDE / App | Config file |
-|-----------|-------------|
-| **Cursor** | `%USERPROFILE%\.cursor\mcp.json` |
-| **Claude Desktop** | `%APPDATA%\Claude\claude_desktop_config.json` |
-| **VS Code** | `.vscode/mcp.json` or **MCP: Open User Configuration** |
+**What's on the demo server:**
+- Several InBiot MICA devices in real office/lab environments (Pamplona, Spain)
+- OpenWeather API pre-configured for outdoor air quality context
+- All 10 tools available and returning live data
 
-> **Requirements:** [Node.js 18+](https://nodejs.org/). To request a token, email **mescribano@inbiot.es**.
+**You need:** [Node.js 18+](https://nodejs.org/) (for `mcp-remote`) and an access token. To request a token, email **mescribano@inbiot.es**.
+
+[Jump to demo server setup](#demo-server-setup)
 
 ---
 
@@ -75,7 +61,7 @@ Use the same `command` / `args` block inside your app's MCP config shape (e.g. C
 | Analytics | `get_data_statistics` | Min/max/mean/median/quartiles/trend for a parameter over a range |
 | | `detect_patterns` | Hourly and daily patterns (peak hours, worst/best days) |
 | | `export_historical_data` | CSV or JSON export, raw or time-aggregated |
-| Scoring | `calculate_go_iaqs_score` | GO IAQS Score (0–10) from live sensor data — per-pollutant sub-scores, tier, grade, dominant pollutant, health advice |
+| Scoring | `calculate_go_iaqs_score` | GO IAQS Score (0-10) from live sensor data — per-pollutant sub-scores, tier, grade, dominant pollutant, health advice |
 | Weather | `outdoor_snapshot` | Outdoor weather + OpenWeather air quality for device coordinates |
 | | `indoor_vs_outdoor` | Side-by-side indoor vs outdoor with filtration effectiveness |
 
@@ -90,16 +76,7 @@ All tools return JSON-friendly structures. Tool responses avoid Markdown so clie
 
 ---
 
-## Local Setup
-
-<details>
-<summary><strong>Click to expand</strong></summary>
-
-### Requirements
-
-- Python 3.10+
-- InBiot MICA device(s) with API credentials from [My inBiot](https://my.inbiot.es)
-- OpenWeather API key (optional) from [OpenWeather](https://openweathermap.org/api)
+## Self-hosted setup
 
 ### Install
 
@@ -143,13 +120,74 @@ inbiot-data-api-mcp
 
 Both use **stdio** transport (typical for Cursor, Claude Code, and local MCP clients).
 
+### Point your MCP client at it
+
+Add to your client's MCP config:
+
+```json
+{
+  "mcpServers": {
+    "inbiot-data-api-mcp": {
+      "command": "python",
+      "args": ["server.py"],
+      "cwd": "/path/to/inbiot-data-api-mcp"
+    }
+  }
+}
+```
+
+| IDE / App | Config file |
+|-----------|-------------|
+| **Cursor** | `%USERPROFILE%\.cursor\mcp.json` |
+| **Claude Desktop** | `%APPDATA%\Claude\claude_desktop_config.json` |
+| **VS Code** | `.vscode/mcp.json` or **MCP: Open User Configuration** |
+| **Claude Code** | `.mcp.json` in your project root |
+
 ### Tests
 
 ```bash
 pytest tests/ -v
 ```
 
-</details>
+---
+
+## Demo server setup
+
+Point your MCP client at the hosted SSE endpoint. The `mcp-remote` package bridges between the remote SSE server and your local client's stdio.
+
+### Cursor (`%USERPROFILE%\.cursor\mcp.json`)
+
+Merge this under `mcpServers` (create the key if missing):
+
+```json
+{
+  "mcpServers": {
+    "inbiot-data-api-mcp": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://mcp.miguel-escribano.com/inbiot-data-api-mcp/sse",
+        "--header",
+        "X-MCP-Token: <YOUR_TOKEN>"
+      ]
+    }
+  }
+}
+```
+
+### Other clients
+
+Use the same `command` / `args` block inside your app's MCP config shape:
+
+| IDE / App | Config file |
+|-----------|-------------|
+| **Cursor** | `%USERPROFILE%\.cursor\mcp.json` |
+| **Claude Desktop** | `%APPDATA%\Claude\claude_desktop_config.json` |
+| **VS Code** | `.vscode/mcp.json` or **MCP: Open User Configuration** |
+| **Claude Code** | `.mcp.json` in your project root |
+
+> **Requirements:** [Node.js 18+](https://nodejs.org/) for `mcp-remote`. To request a token, email **mescribano@inbiot.es**.
 
 ---
 

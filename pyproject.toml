@@ -1,7 +1,7 @@
 [project]
 name = "inbiot-data-api-mcp"
 version = "0.1.0"
-description = "Stateless MCP data API for InBiot sensor data and WELL compliance tools"
+description = "Stateless MCP data API for InBiot sensor data, outdoor weather, and GO IAQS scoring"
 requires-python = ">=3.10"
 dependencies = [
     "fastmcp>=2.0.0",
