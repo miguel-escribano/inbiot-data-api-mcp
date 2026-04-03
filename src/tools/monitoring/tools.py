@@ -11,7 +11,7 @@ from src.models.schemas import DeviceConfig
 from src.utils.aggregation import DataAggregator
 from src.utils.dates import parse_date_param
 from src.utils.validation import validate_device
-from src.utils.normalization import normalize_parameter_name
+from src.utils.normalization import normalize_parameter_name, enrich_measurement
 
 
 def register_monitoring_tools(
@@ -44,7 +44,14 @@ def register_monitoring_tools(
         Get the latest air quality measurements from an InBiot device.
 
         Returns current values for all monitored parameters including temperature,
-        humidity, CO2, particulate matter, VOCs, and composite indicators.
+        humidity, CO2, particulate matter, VOCs, formaldehyde, and composite indicators.
+
+        Unit notes:
+        - TVOC (vocs): returned in ppb (ethanol-calibrated). For WELL/WHO/ASHRAE
+          comparison (µg/m³ Molhave), the response includes `well_value` (ppb × 2.61)
+          and `well_unit` fields.
+        - Formaldehyde: returned in µg/m³ (sensor native unit). WELL uses the same
+          unit (≤9 µg/m³). GO IAQS scoring tools convert to ppb internally.
         """
         try:
             device_config = validate_device(devices, device)
@@ -58,11 +65,9 @@ def register_monitoring_tools(
             reading_timestamp = None
             for param in data:
                 if param.latest_value is not None:
-                    measurements.append({
-                        "parameter": param.type,
-                        "value": param.latest_value,
-                        "unit": param.unit,
-                    })
+                    measurements.append(
+                        enrich_measurement(param.type, param.latest_value, param.unit)
+                    )
                     if reading_timestamp is None and param.latest_timestamp is not None:
                         reading_timestamp = param.latest_timestamp.isoformat()
 
@@ -89,6 +94,9 @@ def register_monitoring_tools(
 
         Retrieves measurements between the specified dates.
         Note: InBiot API is rate-limited to 6 requests per device per hour.
+
+        Unit notes: same as get_latest_measurements — TVOC is ppb (ethanol)
+        with well_value/well_unit for Molhave µg/m³; formaldehyde is µg/m³.
         """
         try:
             device_config = validate_device(devices, device)
@@ -112,7 +120,7 @@ def register_monitoring_tools(
                     stats = aggregator.calculate_statistics(param.measurements)
                     trends = aggregator.detect_trends(param.measurements)
 
-                    parameters.append({
+                    entry = {
                         "parameter": param.type,
                         "unit": param.unit,
                         "latest_value": param.latest_value,
@@ -122,7 +130,13 @@ def register_monitoring_tools(
                         "mean": round(stats["mean"], 1),
                         "trend": trends["trend"],
                         "trend_change_pct": round(trends["change_percentage"], 1),
-                    })
+                    }
+                    if param.type.lower() in ("vocs", "tvoc", "tvocs") and "ppb" in param.unit.lower():
+                        from src.utils.normalization import TVOC_ETHANOL_TO_MOLHAVE
+                        entry["well_mean"] = round(stats["mean"] * TVOC_ETHANOL_TO_MOLHAVE, 1)
+                        entry["well_unit"] = "µg/m³ (Molhave)"
+                        entry["conversion_factor"] = TVOC_ETHANOL_TO_MOLHAVE
+                    parameters.append(entry)
 
             return {
                 "device": device_config.name,
