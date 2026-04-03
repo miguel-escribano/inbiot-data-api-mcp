@@ -1,5 +1,6 @@
 """Weather tools for outdoor conditions and indoor/outdoor comparison."""
 
+from datetime import datetime, timezone, timedelta
 from typing import Annotated, Optional
 
 from fastmcp import FastMCP
@@ -61,7 +62,10 @@ def register_weather_tools(
                     "pm10_ugm3": conditions.pm10,
                     "o3_ugm3": conditions.o3,
                     "no2_ugm3": conditions.no2,
+                    "no_ugm3": conditions.no,
+                    "so2_ugm3": conditions.so2,
                     "co_ugm3": conditions.co,
+                    "nh3_ugm3": conditions.nh3,
                 },
                 "source": "OpenWeather API",
             }
@@ -124,4 +128,136 @@ def register_weather_tools(
         return {
             "device": device_config.name,
             "comparisons": comparisons,
+        }
+
+    @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True})
+    async def outdoor_forecast(
+        device: Annotated[str, Field(description="Device ID (uses device coordinates for location)")],
+        hours: Annotated[int, Field(description="Number of hours to forecast (1-96, default 24)", ge=1, le=96)] = 24,
+    ) -> dict:
+        """
+        Get outdoor air quality forecast for the next hours.
+
+        Returns hourly AQI and pollutant concentrations for up to 4 days.
+        Useful for planning ventilation windows — identify when outdoor air
+        quality will be best or worst.
+        """
+        try:
+            device_config = validate_device(devices, device)
+        except ValueError as e:
+            return {"error": str(e)}
+
+        if openweather_client is None:
+            return {"error": "OpenWeather API key not configured. Set OPENWEATHER_API_KEY environment variable."}
+
+        lat, lon = device_config.coordinates
+
+        try:
+            forecast_data = await openweather_client.get_air_pollution_forecast(lat, lon)
+        except OpenWeatherAPIError as e:
+            return {"error": e.message}
+
+        aqi_labels = {1: "Good", 2: "Fair", 3: "Moderate", 4: "Poor", 5: "Very Poor"}
+        entries = forecast_data.get("list", [])[:hours]
+
+        hourly = []
+        aqi_values = []
+        for entry in entries:
+            aqi = entry.get("main", {}).get("aqi")
+            components = entry.get("components", {})
+            aqi_values.append(aqi)
+            hourly.append({
+                "timestamp": datetime.fromtimestamp(entry["dt"], tz=timezone.utc).isoformat(),
+                "aqi": aqi,
+                "aqi_label": aqi_labels.get(aqi, "Unknown"),
+                "pm25_ugm3": components.get("pm2_5"),
+                "pm10_ugm3": components.get("pm10"),
+                "o3_ugm3": components.get("o3"),
+                "no2_ugm3": components.get("no2"),
+                "co_ugm3": components.get("co"),
+            })
+
+        # Find best and worst windows
+        best_hour = min(hourly, key=lambda h: (h["aqi"] or 99)) if hourly else None
+        worst_hour = max(hourly, key=lambda h: (h["aqi"] or 0)) if hourly else None
+
+        return {
+            "device": device_config.name,
+            "coordinates": {"lat": lat, "lon": lon},
+            "forecast_hours": len(hourly),
+            "summary": {
+                "best_window": {"timestamp": best_hour["timestamp"], "aqi": best_hour["aqi"], "aqi_label": best_hour["aqi_label"]} if best_hour else None,
+                "worst_window": {"timestamp": worst_hour["timestamp"], "aqi": worst_hour["aqi"], "aqi_label": worst_hour["aqi_label"]} if worst_hour else None,
+            },
+            "hourly": hourly,
+            "source": "OpenWeather Air Pollution Forecast API",
+        }
+
+    @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True})
+    async def outdoor_history(
+        device: Annotated[str, Field(description="Device ID (uses device coordinates for location)")],
+        hours_back: Annotated[int, Field(description="Hours of history to retrieve (1-168, default 24)", ge=1, le=168)] = 24,
+    ) -> dict:
+        """
+        Get historical outdoor air quality for a past time range.
+
+        Returns hourly AQI and pollutant concentrations. Useful for correlating
+        indoor air quality events with outdoor conditions — e.g., did an indoor
+        PM2.5 spike coincide with poor outdoor air quality?
+        """
+        try:
+            device_config = validate_device(devices, device)
+        except ValueError as e:
+            return {"error": str(e)}
+
+        if openweather_client is None:
+            return {"error": "OpenWeather API key not configured. Set OPENWEATHER_API_KEY environment variable."}
+
+        lat, lon = device_config.coordinates
+        now = datetime.now(timezone.utc)
+        start = now - timedelta(hours=hours_back)
+
+        try:
+            history_data = await openweather_client.get_air_pollution_history(lat, lon, start, now)
+        except OpenWeatherAPIError as e:
+            return {"error": e.message}
+
+        aqi_labels = {1: "Good", 2: "Fair", 3: "Moderate", 4: "Poor", 5: "Very Poor"}
+        entries = history_data.get("list", [])
+
+        hourly = []
+        aqi_values = []
+        for entry in entries:
+            aqi = entry.get("main", {}).get("aqi")
+            components = entry.get("components", {})
+            aqi_values.append(aqi)
+            hourly.append({
+                "timestamp": datetime.fromtimestamp(entry["dt"], tz=timezone.utc).isoformat(),
+                "aqi": aqi,
+                "aqi_label": aqi_labels.get(aqi, "Unknown"),
+                "pm25_ugm3": components.get("pm2_5"),
+                "pm10_ugm3": components.get("pm10"),
+                "o3_ugm3": components.get("o3"),
+                "no2_ugm3": components.get("no2"),
+                "co_ugm3": components.get("co"),
+            })
+
+        valid_aqi = [a for a in aqi_values if a is not None]
+        return {
+            "device": device_config.name,
+            "coordinates": {"lat": lat, "lon": lon},
+            "period": {
+                "start": start.isoformat(),
+                "end": now.isoformat(),
+                "hours": hours_back,
+                "data_points": len(hourly),
+            },
+            "summary": {
+                "avg_aqi": round(sum(valid_aqi) / len(valid_aqi), 1) if valid_aqi else None,
+                "worst_aqi": max(valid_aqi) if valid_aqi else None,
+                "best_aqi": min(valid_aqi) if valid_aqi else None,
+                "worst_aqi_label": aqi_labels.get(max(valid_aqi), "Unknown") if valid_aqi else None,
+            },
+            "hourly": hourly,
+            "source": "OpenWeather Air Pollution History API",
         }

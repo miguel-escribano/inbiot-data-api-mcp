@@ -4,7 +4,7 @@
 
 ## What is this?
 
-A stateless MCP server that wraps InBiot sensor APIs and OpenWeather into 10 structured tools for air quality monitoring and GO IAQS scoring. Raw data plus deterministic scoring — no compliance logic, no recommendations.
+A stateless MCP server that wraps InBiot sensor APIs and OpenWeather into 12 structured tools for air quality monitoring, outdoor forecasting, and GO IAQS scoring. Raw data plus deterministic scoring — no compliance logic, no recommendations.
 
 **No persona. No prompts. No resources.** Just clean JSON tools. Every tool is registered with read-only / non-destructive hints for MCP clients.
 
@@ -50,7 +50,7 @@ We maintain a hosted instance at `mcp.miguel-escribano.com` with pre-configured 
 
 ---
 
-## Tools (10)
+## Tools (12)
 
 | Group | Tool | What it does |
 |-------|------|-------------|
@@ -62,8 +62,10 @@ We maintain a hosted instance at `mcp.miguel-escribano.com` with pre-configured 
 | | `detect_patterns` | Hourly and daily patterns (peak hours, worst/best days) |
 | | `export_historical_data` | CSV or JSON export, raw or time-aggregated |
 | Scoring | `calculate_go_iaqs_score` | GO IAQS Score (0-10) from live sensor data — per-pollutant sub-scores, tier, grade, dominant pollutant, health advice |
-| Weather | `outdoor_snapshot` | Outdoor weather + OpenWeather air quality for device coordinates |
+| Weather | `outdoor_snapshot` | Outdoor weather + air quality for device coordinates (all pollutants: PM2.5, PM10, O3, NO2, NO, SO2, CO, NH3) |
 | | `indoor_vs_outdoor` | Side-by-side indoor vs outdoor with filtration effectiveness |
+| | `outdoor_forecast` | 4-day hourly air quality forecast — best/worst ventilation windows |
+| | `outdoor_history` | Historical outdoor AQ for a time range (up to 7 days) — correlate with indoor events |
 
 All tools return JSON-friendly structures. Tool responses avoid Markdown so clients can parse them cheaply.
 
@@ -202,9 +204,9 @@ src/
   tools/
     monitoring/tools.py         # 4 monitoring tools
     analytics/tools.py          # 3 analytics tools
+    weather/tools.py            # 4 weather tools (snapshot, comparison, forecast, history)
     scoring/calculator.py       # GO IAQS Score engine (breakpoints, interpolation, synergy)
     scoring/tools.py            # 1 scoring tool
-    weather/tools.py            # 2 weather tools
   models/schemas.py             # Pydantic models (DeviceConfig, ParameterData, OutdoorConditions...)
   config/
     loader.py                   # YAML/JSON/env config loader

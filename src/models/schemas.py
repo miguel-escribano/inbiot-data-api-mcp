@@ -84,8 +84,10 @@ class OutdoorConditions(BaseModel):
     pm10: Optional[float] = None
     o3: Optional[float] = None
     no2: Optional[float] = None
+    no: Optional[float] = None
     so2: Optional[float] = None
     co: Optional[float] = None
+    nh3: Optional[float] = None
 
 
 class IndoorOutdoorComparison(BaseModel):

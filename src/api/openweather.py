@@ -3,7 +3,7 @@
 import os
 import httpx
 from typing import Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from src.models.schemas import OutdoorConditions
 from src.utils.retry import retry_with_backoff, RetryConfig
@@ -74,8 +74,10 @@ class OpenWeatherClient:
             pm10=air_quality_data.get("list", [{}])[0].get("components", {}).get("pm10"),
             o3=air_quality_data.get("list", [{}])[0].get("components", {}).get("o3"),
             no2=air_quality_data.get("list", [{}])[0].get("components", {}).get("no2"),
+            no=air_quality_data.get("list", [{}])[0].get("components", {}).get("no"),
             so2=air_quality_data.get("list", [{}])[0].get("components", {}).get("so2"),
             co=air_quality_data.get("list", [{}])[0].get("components", {}).get("co"),
+            nh3=air_quality_data.get("list", [{}])[0].get("components", {}).get("nh3"),
         )
 
     async def _get_weather(self, lat: float, lon: float) -> dict:
@@ -88,6 +90,38 @@ class OpenWeatherClient:
         params = {"lat": lat, "lon": lon, "units": "metric", "appid": self.api_key}
         result = await self._make_request(endpoint, params)
         await self.cache.set(cache_key, result, WEATHER_TTL)
+        return result
+
+    async def get_air_pollution_forecast(self, lat: float, lon: float) -> dict:
+        """Get 4-day hourly air pollution forecast."""
+        cache_key = f"ow:air_forecast:{lat:.4f}:{lon:.4f}"
+        cached = await self.cache.get(cache_key)
+        if cached is not None:
+            return cached
+        endpoint = "/data/2.5/air_pollution/forecast"
+        params = {"lat": lat, "lon": lon, "appid": self.api_key}
+        result = await self._make_request(endpoint, params)
+        await self.cache.set(cache_key, result, WEATHER_TTL)
+        return result
+
+    async def get_air_pollution_history(
+        self, lat: float, lon: float, start: datetime, end: datetime
+    ) -> dict:
+        """Get historical air pollution data for a time range."""
+        cache_key = f"ow:air_hist:{lat:.4f}:{lon:.4f}:{int(start.timestamp())}:{int(end.timestamp())}"
+        cached = await self.cache.get(cache_key)
+        if cached is not None:
+            return cached
+        endpoint = "/data/2.5/air_pollution/history"
+        params = {
+            "lat": lat,
+            "lon": lon,
+            "start": int(start.timestamp()),
+            "end": int(end.timestamp()),
+            "appid": self.api_key,
+        }
+        result = await self._make_request(endpoint, params)
+        await self.cache.set(cache_key, result, 3600)  # 1h cache for historical
         return result
 
     async def _get_air_pollution(self, lat: float, lon: float) -> dict:
