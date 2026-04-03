@@ -365,3 +365,99 @@ class TestBuildComplianceResult:
         }
         result = build_compliance_result(param_data, NOW)
         assert len(result["hours"]) == 24
+
+    def test_score_series_present(self):
+        param_data = {
+            "pm25": (constant_measurements(5.0, 48, NOW), "µg/m³"),
+            "co2": (constant_measurements(500.0, 48, NOW), "ppm"),
+        }
+        result = build_compliance_result(param_data, NOW)
+        assert "score_series" in result
+        assert len(result["score_series"]) == 24
+
+
+# ---------------------------------------------------------------------------
+# Score series — 24h hourly GO IAQS Score
+# ---------------------------------------------------------------------------
+
+class TestScoreSeries:
+    def test_length(self):
+        param_data = {
+            "pm25": (constant_measurements(5.0, 48, NOW), "µg/m³"),
+            "co2": (constant_measurements(500.0, 48, NOW), "ppm"),
+        }
+        result = build_compliance_result(param_data, NOW)
+        assert len(result["score_series"]) == 24
+
+    def test_constant_good_values(self):
+        param_data = {
+            "pm25": (constant_measurements(0.0, 48, NOW), "µg/m³"),
+            "co2": (constant_measurements(400.0, 48, NOW), "ppm"),
+        }
+        result = build_compliance_result(param_data, NOW)
+        for point in result["score_series"]:
+            assert point["score"] == 10
+            assert point["category"] == "Good"
+            assert point["grade"] == "A"
+
+    def test_spike_drops_score(self):
+        """CO2 spike in the middle of the period should produce lower scores."""
+        low = [[500.0] * 6] * 36
+        high = [[1200.0] * 6] * 6
+        normal_end = [[500.0] * 6] * 6
+        co2_ms = make_measurements(low + high + normal_end, NOW)
+        param_data = {
+            "pm25": (constant_measurements(0.0, 48, NOW), "µg/m³"),
+            "co2": (co2_ms, "ppm"),
+        }
+        result = build_compliance_result(param_data, NOW)
+        scores = [p["score"] for p in result["score_series"]]
+        assert min(scores) < 10
+        assert max(scores) == 10
+
+    def test_synergy_in_hourly_score(self):
+        """When PM2.5 and CO2 both produce the same Moderate sub-score,
+        synergistic reduction should apply to the hourly Score."""
+        pm25_ms = constant_measurements(15.67, 48, NOW)
+        co2_ms = constant_measurements(950.0, 48, NOW)
+        param_data = {
+            "pm25": (pm25_ms, "µg/m³"),
+            "co2": (co2_ms, "ppm"),
+        }
+        result = build_compliance_result(param_data, NOW)
+        for point in result["score_series"]:
+            assert point["score"] == 5
+
+    def test_ch2o_conversion_in_score(self):
+        """Formaldehyde in µg/m³ should be converted to ppb before scoring."""
+        param_data = {
+            "pm25": (constant_measurements(0.0, 48, NOW), "µg/m³"),
+            "co2": (constant_measurements(400.0, 48, NOW), "ppm"),
+            "formaldehyde": (constant_measurements(33.0, 48, NOW), "µg/m³"),
+        }
+        result = build_compliance_result(param_data, NOW)
+        for point in result["score_series"]:
+            assert point["score"] is not None
+            assert point["score"] >= 8
+
+    def test_empty_hour_returns_none(self):
+        """Hours with no measurements should produce null scores."""
+        ms = constant_measurements(500.0, 12, NOW)
+        param_data = {
+            "co2": (ms, "ppm"),
+        }
+        result = build_compliance_result(param_data, NOW)
+        scores = result["score_series"]
+        has_none = any(p["score"] is None for p in scores)
+        has_value = any(p["score"] is not None for p in scores)
+        assert has_none and has_value
+
+    def test_dominant_pollutant_tracked(self):
+        """Dominant pollutant should reflect the worst sub-score each hour."""
+        param_data = {
+            "pm25": (constant_measurements(5.0, 48, NOW), "µg/m³"),
+            "co2": (constant_measurements(950.0, 48, NOW), "ppm"),
+        }
+        result = build_compliance_result(param_data, NOW)
+        for point in result["score_series"]:
+            assert "co2" in point["dominant"]

@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 from src.models.schemas import Measurement
 from src.tools.scoring.calculator import (
     CH2O_UG_TO_PPB,
+    GoIaqsCalculator,
     SENSOR_TO_GOIAQS,
     STARTER_POLLUTANTS,
 )
@@ -208,6 +209,60 @@ def compute_context_series(
     }
 
 
+def compute_score_series(
+    goiaqs_data: dict[str, tuple[list[Measurement], str]],
+    chart_end: datetime,
+) -> list[dict]:
+    """Compute the GO IAQS Score for each of the last 24 hours.
+
+    For each hour, computes the hourly mean of each available GO IAQS
+    pollutant, passes them through GoIaqsCalculator.calculate(), and
+    collects the result. CH2O is converted from ug/m3 to ppb when the
+    sensor unit indicates micrograms.
+
+    Returns a list of 24 dicts: {hour, score, category, grade, dominant}.
+    """
+    calculator = GoIaqsCalculator()
+    series: list[dict] = []
+
+    for h in range(CHART_HOURS):
+        hour_end = chart_end - timedelta(hours=CHART_HOURS - 1 - h)
+        hour_start = hour_end - timedelta(hours=1)
+
+        measurements_for_hour: dict[str, float] = {}
+
+        for goiaqs_key, (measurements, sensor_unit) in goiaqs_data.items():
+            h_mean = hourly_mean(measurements, hour_start)
+            if h_mean is None:
+                continue
+
+            if goiaqs_key == "ch2o" and "µg" in sensor_unit.lower():
+                h_mean = round(h_mean / CH2O_UG_TO_PPB, 1)
+
+            measurements_for_hour[goiaqs_key] = h_mean
+
+        if not measurements_for_hour:
+            series.append({
+                "hour": hour_end.isoformat(),
+                "score": None,
+                "category": None,
+                "grade": None,
+                "dominant": [],
+            })
+            continue
+
+        result = calculator.calculate(measurements_for_hour)
+        series.append({
+            "hour": hour_end.isoformat(),
+            "score": result.total_score,
+            "category": result.category,
+            "grade": result.grade,
+            "dominant": result.dominant_pollutant,
+        })
+
+    return series
+
+
 def build_compliance_result(
     param_data: dict[str, tuple[list[Measurement], str]],
     chart_end: datetime,
@@ -256,9 +311,12 @@ def build_compliance_result(
             goiaqs_data, context_data, ULTIMATE_LIMITS, chart_end,
         )
 
+    score_series = compute_score_series(goiaqs_data, chart_end)
+
     return {
         "tier": tier,
         "hours": hour_labels,
+        "score_series": score_series,
         "starter": starter,
         "ultimate": ultimate,
         "available_pollutants": sorted(goiaqs_keys),
